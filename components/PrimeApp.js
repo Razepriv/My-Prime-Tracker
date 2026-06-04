@@ -12,13 +12,18 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { WORKOUTS, getSchedule, demoUrl } from "@/lib/workouts";
-import { targets, bmi, bmiBand, ACTIVITY, GOALS } from "@/lib/calc";
+import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum } from "@/lib/calc";
+import { computeAdaptive } from "@/lib/adaptive";
 import {
   buildPlan, foodById, sumLog, MEAL_ORDER, MEAL_LABEL,
 } from "@/lib/foods";
 
 /* ============================ STORAGE (Supabase) ============================ */
 let CURRENT_USER = null;
+// write-status listener so the UI can surface save failures instead of losing data silently
+let SYNC_LISTENER = null;
+function setSyncListener(fn) { SYNC_LISTENER = fn; }
+function notifySync(status) { if (SYNC_LISTENER) SYNC_LISTENER(status); }
 
 async function sGet(key) {
   if (!CURRENT_USER) return null;
@@ -29,19 +34,46 @@ async function sGet(key) {
     return data.value;
   } catch (e) { return null; }
 }
-async function sSet(key, value) {
-  if (!CURRENT_USER) return;
+// Batch-fetch several keys in one round-trip → object keyed by key.
+async function sGetMany(keys) {
+  if (!CURRENT_USER || !keys.length) return {};
   try {
-    await supabase.from("user_data").upsert(
-      { user_id: CURRENT_USER, key, value, updated_at: new Date().toISOString() },
-      { onConflict: "user_id,key" }
-    );
-  } catch (e) {}
+    const { data, error } = await supabase.from("user_data").select("key,value").in("key", keys);
+    if (error || !data) return {};
+    const out = {};
+    for (const row of data) out[row.key] = row.value;
+    return out;
+  } catch (e) { return {}; }
+}
+// Fetch all rows whose key starts with prefix (used for day history).
+async function sGetPrefix(prefix) {
+  if (!CURRENT_USER) return [];
+  try {
+    const { data, error } = await supabase.from("user_data").select("key,value").like("key", prefix + "%");
+    if (error || !data) return [];
+    return data;
+  } catch (e) { return []; }
+}
+async function sSet(key, value) {
+  if (!CURRENT_USER) return false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { error } = await supabase.from("user_data").upsert(
+        { user_id: CURRENT_USER, key, value, updated_at: new Date().toISOString() },
+        { onConflict: "user_id,key" }
+      );
+      if (!error) { notifySync({ ok: true }); return true; }
+    } catch (e) { /* retry */ }
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+  }
+  notifySync({ ok: false });
+  return false;
 }
 async function clearAll() {
   if (!CURRENT_USER) return;
   try { await supabase.from("user_data").delete().like("key", "prime-%"); } catch (e) {}
 }
+const PHOTO_URL_TTL = 60 * 60 * 24 * 7; // 7 days
 
 /* ============================ DATE HELPERS ============================ */
 function dateKey(d) {
@@ -376,8 +408,10 @@ export default function PrimeApp() {
   const [lifts, setLifts] = useState({});
   const [complete, setComplete] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [history, setHistory] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
   const [recipeFood, setRecipeFood] = useState(null);
+  const [syncErr, setSyncErr] = useState(false);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween);
@@ -385,6 +419,12 @@ export default function PrimeApp() {
   const isToday = key === dateKey(new Date());
 
   useEffect(() => setMounted(true), []);
+
+  /* ---- surface save failures ---- */
+  useEffect(() => {
+    setSyncListener((s) => setSyncErr(!s.ok));
+    return () => setSyncListener(null);
+  }, []);
 
   /* ---- auth session ---- */
   useEffect(() => {
@@ -400,19 +440,28 @@ export default function PrimeApp() {
     if (!session) { setProfile(null); setDataLoading(false); return; }
     setDataLoading(true);
     (async () => {
-      const p = await sGet("prime-profile");
+      const core = await sGetMany(["prime-profile", "prime-weights", "prime-lifts", "prime-complete"]);
+      const p = core["prime-profile"];
       if (p) {
         setProfile(p);
-        setWeights((await sGet("prime-weights")) || []);
-        setLifts((await sGet("prime-lifts")) || {});
-        setComplete((await sGet("prime-complete")) || []);
-        await loadPhotos();
+        setWeights(core["prime-weights"] || []);
+        setLifts(core["prime-lifts"] || {});
+        setComplete(core["prime-complete"] || []);
+        loadPhotos();
+        loadHistory();
       } else {
         setProfile(null);
       }
       setDataLoading(false);
     })();
   }, [session]);
+
+  /* ---- day history (for the adaptive engine) ---- */
+  async function loadHistory() {
+    const rows = await sGetPrefix("prime-day-");
+    const days = rows.map((r) => ({ date: r.key.replace("prime-day-", ""), ...(r.value || {}) }));
+    setHistory(days);
+  }
 
   /* ---- load selected day ---- */
   useEffect(() => {
@@ -421,7 +470,12 @@ export default function PrimeApp() {
   }, [key, session, profile]);
 
   const latestWeight = weights.length ? weights[weights.length - 1].weight : (profile ? profile.startWeight : 0);
-  const T = profile ? targets(profile, latestWeight) : { calories: 0, protein: 0, carbs: 0, fat: 0, tdee: 0, bmr: 0 };
+  // adaptive maintenance from real intake vs weight trend
+  const adaptive = profile ? computeAdaptive(weights, history) : { ready: false, maintenance: 0, trend: { slopePerWeek: 0 }, intake: { avg: 0, days: 0 } };
+  const useAdaptive = profile && profile.adaptive !== false && adaptive.ready;
+  const T = profile
+    ? targets(profile, latestWeight, useAdaptive ? { maintenance: adaptive.maintenance } : {})
+    : { calories: 0, protein: 0, carbs: 0, fat: 0, tdee: 0, bmr: 0, adaptive: false };
   const consumed = sumLog(day.food);
 
   /* ---- completion / scoring ---- */
@@ -453,6 +507,10 @@ export default function PrimeApp() {
     setDay(next);
     sSet("prime-day-" + key, next);
     syncComplete(next);
+    setHistory((prev) => {
+      const rest = prev.filter((d) => d.date !== key);
+      return [...rest, { date: key, ...next }];
+    });
   }, [key, syncComplete]);
 
   const setSteps = (v) => saveDay({ ...day, steps: Math.max(0, v) });
@@ -510,7 +568,7 @@ export default function PrimeApp() {
     const meta = (await sGet("prime-photos")) || [];
     const withUrls = await Promise.all(meta.map(async (m) => {
       try {
-        const { data } = await supabase.storage.from("progress").createSignedUrl(m.path, 3600);
+        const { data } = await supabase.storage.from("progress").createSignedUrl(m.path, PHOTO_URL_TTL);
         return { ...m, url: data?.signedUrl || null };
       } catch (e) { return { ...m, url: null }; }
     }));
@@ -600,6 +658,19 @@ export default function PrimeApp() {
     </div>
   );
 
+  const AdaptiveCard = useAdaptive ? (
+    <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.amberDim}` }}>
+      <div className="flex items-center gap-2 mb-1">
+        <Activity size={15} style={{ color: COL.amber }} />
+        <span className="font-bold text-white text-sm">Adaptive target is on</span>
+      </div>
+      <div className="text-sm" style={{ color: "#9a9aa3" }}>
+        Measured from your last {adaptive.intake.days} logged days: your real maintenance is ≈ <span style={{ color: COL.amber }}>{adaptive.maintenance} kcal</span>
+        {" "}(weight trend {adaptive.trend.slopePerWeek >= 0 ? "+" : ""}{adaptive.trend.slopePerWeek.toFixed(2)} kg/wk). Your daily goal auto-adjusts to keep you on pace.
+      </div>
+    </div>
+  ) : null;
+
   /* ============================ TODAY ============================ */
   const TodayView = (
     <div className="space-y-4">
@@ -620,6 +691,7 @@ export default function PrimeApp() {
       </div>
 
       {NutritionCard}
+      {AdaptiveCard}
 
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -1006,6 +1078,14 @@ export default function PrimeApp() {
           </div>
         </div>
 
+        {syncErr && (
+          <div className="px-4 pt-2">
+            <div className="rounded-xl px-3 py-2 text-xs flex items-center justify-between" style={{ background: "#2a1414", color: "#ff8a8a", border: "1px solid #3a1a1a" }}>
+              <span>Couldn&apos;t save your last change — check your connection.</span>
+              <button onClick={() => setSyncErr(false)} style={{ color: "#ff8a8a" }}><X size={14} /></button>
+            </div>
+          </div>
+        )}
         <div className="px-4 py-4" style={{ paddingBottom: 96 }}>
           {sched.beforeStart && (
             <div className="rounded-2xl p-4 mb-4 text-sm" style={{ background: COL.card, border: `1px solid ${COL.line}`, color: "#9a9aa3" }}>
@@ -1086,8 +1166,12 @@ export default function PrimeApp() {
           onSignOut={async () => { setShowSettings(false); await supabase.auth.signOut(); }}
           onReset={async () => {
             if (confirm("Reset ALL your data and start over? This cannot be undone.")) {
+              try {
+                const meta = (await sGet("prime-photos")) || [];
+                if (meta.length) await supabase.storage.from("progress").remove(meta.map((m) => m.path));
+              } catch (e) {}
               await clearAll();
-              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
+              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setHistory([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
             }
           }}
         />
@@ -1154,15 +1238,15 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
           </div>
           <div className="flex gap-3">
             <div className="flex-1"><Label>Sex</Label><div className="mt-2"><Pills cols={2} options={[["male", "Male"], ["female", "Female"]]} value={profile.sex || "male"} onChange={(v) => onUpdate({ sex: v })} /></div></div>
-            <div style={{ width: 90 }}><Label>Age</Label><div className="mt-2"><Input value={profile.age ?? ""} onChange={(e) => onUpdate({ age: parseInt(e.target.value) || 0 })} inputMode="numeric" /></div></div>
+            <div style={{ width: 90 }}><Label>Age</Label><div className="mt-2"><Input defaultValue={profile.age ?? ""} onBlur={(e) => onUpdate({ age: clampNum(e.target.value, 13, 100, profile.age) })} inputMode="numeric" /></div></div>
           </div>
           <div className="flex gap-3">
-            <div className="flex-1"><Label>Height (cm)</Label><div className="mt-2"><Input value={profile.heightCm ?? ""} onChange={(e) => onUpdate({ heightCm: num(e.target.value) })} inputMode="decimal" /></div></div>
-            <div className="flex-1"><Label>Goal weight</Label><div className="mt-2"><Input value={profile.goalWeight ?? ""} onChange={(e) => onUpdate({ goalWeight: num(e.target.value) })} inputMode="decimal" /></div></div>
+            <div className="flex-1"><Label>Height (cm)</Label><div className="mt-2"><Input defaultValue={profile.heightCm ?? ""} onBlur={(e) => onUpdate({ heightCm: clampNum(e.target.value, 120, 230, profile.heightCm) })} inputMode="decimal" /></div></div>
+            <div className="flex-1"><Label>Goal weight</Label><div className="mt-2"><Input defaultValue={profile.goalWeight ?? ""} onBlur={(e) => onUpdate({ goalWeight: clampNum(e.target.value, 30, 300, profile.goalWeight) })} inputMode="decimal" /></div></div>
           </div>
           <div>
             <Label>Starting weight</Label>
-            <div className="mt-2"><Input value={profile.startWeight ?? ""} onChange={(e) => onUpdate({ startWeight: num(e.target.value) })} inputMode="decimal" /></div>
+            <div className="mt-2"><Input defaultValue={profile.startWeight ?? ""} onBlur={(e) => onUpdate({ startWeight: clampNum(e.target.value, 30, 300, profile.startWeight) })} inputMode="decimal" /></div>
             <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>Daily weigh-ins are logged on the Today tab.</div>
           </div>
           <div>
@@ -1188,6 +1272,11 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
             <div><Label>Regional cuisine</Label><div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={profile.region || "north"} onChange={(v) => onUpdate({ region: v })} /></div></div>
           )}
           <div><Label>Diet preference</Label><div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={profile.diet || "both"} onChange={(v) => onUpdate({ diet: v })} /></div></div>
+          <div>
+            <Label>Adaptive targets</Label>
+            <div className="mt-2"><Pills cols={2} options={[["on", "On"], ["off", "Off"]]} value={profile.adaptive === false ? "off" : "on"} onChange={(v) => onUpdate({ adaptive: v === "on" })} /></div>
+            <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>When on, your calorie goal is recalculated from your real intake &amp; weight trend once you have ~2 weeks of data.</div>
+          </div>
 
           <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
 
