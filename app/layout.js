@@ -19,6 +19,10 @@ export const metadata = {
     images: ["/icon.svg"],
   },
   twitter: { card: "summary", title: "PRIME Tracker", description: "Your private 28-week transformation tracker." },
+  verification: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }
+    : undefined,
+  robots: { index: true, follow: true },
 };
 
 export const viewport = {

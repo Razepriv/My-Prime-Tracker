@@ -4,9 +4,9 @@ const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://primetracker.apexaios.
 
 export default function sitemap() {
   const now = new Date();
+  // Note: /app is intentionally excluded — it's login-gated and marked noindex.
   const base = [
     { url: `${SITE}/`, lastModified: now, changeFrequency: "weekly", priority: 1 },
-    { url: `${SITE}/app`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${SITE}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.7 },
   ];
   const posts = POSTS.map((p) => ({
