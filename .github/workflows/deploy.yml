@@ -14,6 +14,11 @@ name: Deploy to Vercel
 
 on:
   workflow_dispatch:
+    inputs:
+      vercel_token:
+        description: "Vercel token (used if the VERCEL_TOKEN secret is not set). Revoke it after the run."
+        required: false
+        default: ""
   push:
     branches: [main]
 
@@ -24,7 +29,13 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN || github.event.inputs.vercel_token }}
     steps:
+      - name: Mask the Vercel token in logs
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then echo "::add-mask::$VERCEL_TOKEN"; fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -50,19 +61,15 @@ jobs:
         run: npm install -g vercel@latest
 
       - name: Create / link Vercel project
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::error::VERCEL_TOKEN secret is not set. Add it under Settings -> Secrets and variables -> Actions."
+            echo "::error::No Vercel token. Add a VERCEL_TOKEN repo secret, or pass vercel_token when dispatching."
             exit 1
           fi
           vercel project add my-prime-tracker --token "$VERCEL_TOKEN" 2>/dev/null || true
           vercel link --yes --project my-prime-tracker --token "$VERCEL_TOKEN"
 
       - name: Set environment variables on Vercel
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           for target in production preview development; do
             vercel env rm NEXT_PUBLIC_SUPABASE_URL "$target" -y --token "$VERCEL_TOKEN" 2>/dev/null || true
@@ -72,8 +79,6 @@ jobs:
           done
 
       - name: Build and deploy (production)
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
           vercel build --prod --token "$VERCEL_TOKEN"
