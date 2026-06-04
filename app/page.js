@@ -1,5 +1,5 @@
-import PrimeApp from "@/components/PrimeApp";
+import Landing from "@/components/Landing";
 
 export default function Page() {
-  return <PrimeApp />;
+  return <Landing />;
 }

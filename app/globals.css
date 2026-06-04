@@ -6,3 +6,30 @@ html, body { background: #0a0a0c; margin: 0; padding: 0; }
 * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
 input, textarea, button { font-family: inherit; }
 ::-webkit-scrollbar { width: 0; height: 0; }
+html { scroll-behavior: smooth; }
+
+/* ---- landing animations ---- */
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+@keyframes floaty2 {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-22px); }
+}
+@keyframes glowpulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.6; }
+}
+.float-a { animation: floaty 6s ease-in-out infinite; }
+.float-b { animation: floaty2 7.5s ease-in-out infinite; }
+
+/* scroll-reveal: starts hidden, .is-in reveals */
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1); will-change: opacity, transform; }
+.reveal.is-in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .float-a, .float-b { animation: none; }
+  html { scroll-behavior: auto; }
+}
