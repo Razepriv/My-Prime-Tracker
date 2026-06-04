@@ -1533,11 +1533,18 @@ export default function PrimeApp() {
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2"><Camera size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">Progress photos</span></div>
-          <label className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold cursor-pointer" style={{ background: COL.amber, color: "#000" }}>
-            <Upload size={12} /> {photoBusy ? "Uploading…" : "Add"}
-            <input type="file" accept="image/*" className="hidden" disabled={photoBusy}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); e.target.value = ""; }} />
-          </label>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold cursor-pointer" style={{ background: COL.amber, color: "#000", opacity: photoBusy ? 0.6 : 1 }}>
+              <Camera size={12} /> {photoBusy ? "…" : "Camera"}
+              <input type="file" accept="image/*" capture="environment" className="hidden" disabled={photoBusy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); e.target.value = ""; }} />
+            </label>
+            <label className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold cursor-pointer" style={{ background: COL.inp, color: "#fff", border: `1px solid ${COL.line}`, opacity: photoBusy ? 0.6 : 1 }}>
+              <Upload size={12} /> {photoBusy ? "Uploading…" : "Upload"}
+              <input type="file" accept="image/*" className="hidden" disabled={photoBusy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); e.target.value = ""; }} />
+            </label>
+          </div>
         </div>
         {photoErr && <div className="text-xs mb-2 rounded-lg px-3 py-2" style={{ background: "#2a1414", color: "#ff8a8a" }}>{photoErr}</div>}
         {photos.length === 0 ? (
@@ -1906,11 +1913,18 @@ function MealPhotoModal({ onAdd, onClose }) {
         {preview && <img src={preview} alt="meal" style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 14, marginBottom: 10 }} />}
 
         {!est && (
-          <label className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}>
-            <Camera size={16} /> {busy ? "Analyzing…" : preview ? "Try another photo" : "Take / choose a photo"}
-            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
-          </label>
+          <div className="flex gap-2">
+            <label className="flex-1 rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}>
+              <Camera size={16} /> {busy ? "Analyzing…" : "Take photo"}
+              <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
+            </label>
+            <label className="flex-1 rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer" style={{ background: COL.inp, color: "#fff", border: `1px solid ${COL.line}`, opacity: busy ? 0.6 : 1 }}>
+              <Upload size={16} /> {busy ? "Analyzing…" : "Upload"}
+              <input type="file" accept="image/*" className="hidden" disabled={busy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
+            </label>
+          </div>
         )}
         {msg && <div className="text-xs mt-2" style={{ color: "#ff8a8a" }}>{msg}</div>}
 

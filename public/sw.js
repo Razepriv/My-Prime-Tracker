@@ -1,20 +1,29 @@
 // Minimal, conservative service worker.
 // - Precaches the app shell so it opens offline.
 // - Navigations: network-first, fall back to cached /app when offline.
+// - Static assets: stale-while-revalidate so a new deploy lands without a manual cache bump.
 // - Everything else (Supabase, RapidAPI, etc.) passes straight through.
-const CACHE = "prime-v3";
+//
+// Update flow: we DON'T skipWaiting automatically. The page (see components/PWA.js)
+// detects a freshly installed worker and posts "SKIP_WAITING"; the new worker then
+// takes over and the page reloads once — so a bookmarked / installed app actually
+// shows the new build instead of the warm, stale one.
+const CACHE = "prime-v4";
 const SHELL = ["/app", "/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
-  self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
   );
-  self.clients.claim();
+});
+
+// The page asks the waiting worker to take over the moment a new build is ready.
+self.addEventListener("message", (e) => {
+  if (e.data === "SKIP_WAITING" || (e.data && e.data.type === "SKIP_WAITING")) self.skipWaiting();
 });
 
 self.addEventListener("push", (e) => {
@@ -50,8 +59,14 @@ self.addEventListener("fetch", (e) => {
     );
     return;
   }
-  // static assets: cache-first, then network
-  e.respondWith(caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-    const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res;
-  }).catch(() => cached)));
+  // static assets: stale-while-revalidate — serve cache instantly, refresh in the background.
+  e.respondWith(
+    caches.match(req).then((cached) => {
+      const network = fetch(req).then((res) => {
+        if (res && res.status === 200) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+        return res;
+      }).catch(() => cached);
+      return cached || network;
+    })
+  );
 });
