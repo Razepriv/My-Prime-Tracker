@@ -7,16 +7,17 @@ import {
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
   Play, Upload, Trash2, User, Activity, Leaf, Beef, Timer, RotateCcw,
-  Sparkles, Send,
+  Sparkles, Send, Smartphone,
 } from "lucide-react";
+import InstallGuide from "@/components/InstallGuide";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
-import { WORKOUTS, getSchedule, demoUrl } from "@/lib/workouts";
+import { WORKOUTS, getSchedule, demoUrl, exSearch, goalPlan } from "@/lib/workouts";
 import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum } from "@/lib/calc";
 import { computeAdaptive } from "@/lib/adaptive";
 import {
-  buildPlan, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
+  buildPlan, composePlan, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
 } from "@/lib/foods";
 
 /* ============================ STORAGE (Supabase) ============================ */
@@ -366,17 +367,18 @@ function blankDay() { return { steps: 0, water: 0, sleep: "", weight: "", ex: {}
 
 /* ===== exercise media (gif + video) from the ExerciseDB proxy, with fallback ===== */
 const EX_MEDIA_CACHE = {};
-function ExerciseMedia({ name, fallbackHref }) {
-  const [m, setM] = useState(EX_MEDIA_CACHE[name]);
+function ExerciseMedia({ name, query, fallbackHref }) {
+  const q = query || name;
+  const [m, setM] = useState(EX_MEDIA_CACHE[q]);
   useEffect(() => {
     let on = true;
-    if (EX_MEDIA_CACHE[name] !== undefined) { setM(EX_MEDIA_CACHE[name]); return; }
-    fetch("/api/exercise?name=" + encodeURIComponent(name))
+    if (EX_MEDIA_CACHE[q] !== undefined) { setM(EX_MEDIA_CACHE[q]); return; }
+    fetch("/api/exercise?name=" + encodeURIComponent(q))
       .then((r) => r.json())
-      .then((d) => { EX_MEDIA_CACHE[name] = d; if (on) setM(d); })
-      .catch(() => { EX_MEDIA_CACHE[name] = { found: false }; if (on) setM({ found: false }); });
+      .then((d) => { EX_MEDIA_CACHE[q] = d; if (on) setM(d); })
+      .catch(() => { EX_MEDIA_CACHE[q] = { found: false }; if (on) setM({ found: false }); });
     return () => { on = false; };
-  }, [name]);
+  }, [q]);
 
   const videoHref = (m && m.found && m.video) ? m.video : fallbackHref;
   return (
@@ -396,14 +398,14 @@ function ExerciseMedia({ name, fallbackHref }) {
 
 /* ============================ SET LOGGING ============================ */
 function parseSetCount(s) { const m = (s || "").match(/(\d+)/); return m ? Math.min(6, Math.max(1, parseInt(m[1]))) : 3; }
-function ensureSets(e, st) {
+function ensureSets(e, st, extra = 0) {
   if (st && Array.isArray(st.sets) && st.sets.length) return st.sets.map((x) => ({ w: x.w ?? "", reps: x.reps ?? "", done: !!x.done }));
-  const n = parseSetCount(e.sets);
+  const n = parseSetCount(e.sets) + extra;
   const seed = st?.weight || "";
   return Array.from({ length: n }, (_, i) => ({ w: i === 0 ? seed : "", reps: "", done: !!st?.done }));
 }
 
-function RestTimer() {
+function RestTimer({ suggest = 90 }) {
   const [sec, setSec] = useState(0);
   const [running, setRunning] = useState(false);
   useEffect(() => {
@@ -415,13 +417,15 @@ function RestTimer() {
   const start = (s) => { setSec(s); setRunning(true); };
   const mm = String(Math.floor(sec / 60)).padStart(1, "0");
   const ss = String(sec % 60).padStart(2, "0");
+  const options = Array.from(new Set([suggest, 60, 90, 120])).sort((a, b) => a - b);
   return (
     <div className="mt-2 flex items-center gap-2 flex-wrap">
       <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: running ? COL.amber : "#6b6b73" }}>
         <Timer size={13} /> {running || sec > 0 ? `${mm}:${ss}` : "Rest"}
       </div>
-      {[60, 90, 120].map((s) => (
-        <button key={s} onClick={() => start(s)} className="rounded-lg px-2 py-1 text-xs font-semibold" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{s}s</button>
+      {options.map((s) => (
+        <button key={s} onClick={() => start(s)} className="rounded-lg px-2 py-1 text-xs font-semibold"
+          style={s === suggest ? { background: COL.amberDim, color: "#000", border: `1px solid ${COL.amber}` } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{s}s</button>
       ))}
       {(running || sec > 0) && (
         <button onClick={() => { setRunning(false); setSec(0); }} className="rounded-lg px-2 py-1 text-xs" style={{ background: COL.inp, color: "#6b6b73" }}><RotateCcw size={12} /></button>
@@ -430,7 +434,7 @@ function RestTimer() {
   );
 }
 
-function ExerciseCard({ e, initial, last, onPersist }) {
+function ExerciseCard({ e, initial, last, onPersist, restSec = 90 }) {
   const [sets, setSets] = useState(initial);
   const allDone = sets.length > 0 && sets.every((s) => s.done);
   const doneCount = sets.filter((s) => s.done).length;
@@ -458,7 +462,7 @@ function ExerciseCard({ e, initial, last, onPersist }) {
           <div className="text-xs" style={{ color: COL.amber }}>{e.muscle} · {e.sets}</div>
           {e.cue && <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>{e.cue}</div>}
           {last && last.weight ? <div className="text-xs mt-1" style={{ color: COL.amber }}>last best: {last.weight} kg — beat it</div> : null}
-          <ExerciseMedia name={e.name} fallbackHref={demoUrl(e.name)} />
+          <ExerciseMedia name={e.name} query={exSearch(e.id, e.name)} fallbackHref={demoUrl(e.name)} />
 
           {/* per-set grid */}
           <div className="mt-3 space-y-1.5">
@@ -484,7 +488,7 @@ function ExerciseCard({ e, initial, last, onPersist }) {
             </div>
           </div>
 
-          <RestTimer />
+          <RestTimer suggest={restSec} />
         </div>
       </div>
     </div>
@@ -512,6 +516,7 @@ export default function PrimeApp() {
   const [syncErr, setSyncErr] = useState(false);
   const [dietQuery, setDietQuery] = useState("");
   const [coach, setCoach] = useState(null); // null | { starter }
+  const [showTour, setShowTour] = useState(false);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween);
@@ -525,6 +530,13 @@ export default function PrimeApp() {
     setSyncListener((s) => setSyncErr(!s.ok));
     return () => setSyncListener(null);
   }, []);
+
+  /* ---- show the walkthrough once, after the profile exists ---- */
+  useEffect(() => {
+    if (profile && typeof window !== "undefined") {
+      try { if (!localStorage.getItem(TOUR_KEY)) setShowTour(true); } catch (e) {}
+    }
+  }, [profile]);
 
   /* ---- auth session ---- */
   useEffect(() => {
@@ -577,6 +589,7 @@ export default function PrimeApp() {
     ? targets(profile, latestWeight, useAdaptive ? { maintenance: adaptive.maintenance } : {})
     : { calories: 0, protein: 0, carbs: 0, fat: 0, tdee: 0, bmr: 0, adaptive: false };
   const consumed = sumLog(day.food);
+  const STEPG = profile ? goalPlan(profile.goal).stepGoal : STEP_GOAL;
 
   /* ---- completion / scoring ---- */
   const isDayComplete = useCallback((dayObj) => {
@@ -654,6 +667,10 @@ export default function PrimeApp() {
     const item = { fid: f.id || null, name: f.name, kcal: f.kcal || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0, qty: 1, slot: slot || f.meal || "snack" };
     saveDay({ ...day, food: [...(day.food || []), item] });
   };
+  const logPlanItems = (planItems) => {
+    const add = planItems.map((f) => ({ fid: f.id, name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, qty: f.qty || 1, slot: f.slot || f.meal || "snack" }));
+    saveDay({ ...day, food: [...(day.food || []), ...add] });
+  };
   const removeFood = (idx) => saveDay({ ...day, food: day.food.filter((_, i) => i !== idx) });
   const setFoodQty = (idx, delta) => {
     const arr = day.food.map((it, i) => i === idx ? { ...it, qty: Math.max(1, (it.qty || 1) + delta) } : it);
@@ -717,7 +734,7 @@ export default function PrimeApp() {
       const doneCount = list.filter((e) => day.ex?.[e.id]?.done).length;
       pts += (doneCount / list.length) * 2;
     }
-    max += 1; if (day.steps >= STEP_GOAL) pts += 1;
+    max += 1; if (day.steps >= STEPG) pts += 1;
     max += 1; if (day.water >= WATER_GOAL) pts += 1;
     const sl = parseFloat(day.sleep); max += 1; if (!isNaN(sl) && sl >= 7) pts += 1;
     return Math.round((pts / max) * 100);
@@ -736,6 +753,7 @@ export default function PrimeApp() {
   const region = profile.region || "any";
   const diet = profile.diet || "both";
   const plan = buildPlan(region, diet);
+  const gp = goalPlan(profile.goal);
 
   const coachContext = [
     `Name: ${profile.name || "(none)"}; sex ${profile.sex}; age ${profile.age}; height ${profile.heightCm}cm.`,
@@ -820,8 +838,8 @@ export default function PrimeApp() {
             <Footprints size={16} style={{ color: COL.amber }} /><span className="text-sm font-semibold">Steps</span>
           </div>
           <div className="text-2xl font-extrabold text-white mb-1">{day.steps.toLocaleString()}</div>
-          <div className="text-xs mb-2" style={{ color: "#6b6b73" }}>goal {STEP_GOAL.toLocaleString()}</div>
-          <Bar pct={(day.steps / STEP_GOAL) * 100} />
+          <div className="text-xs mb-2" style={{ color: "#6b6b73" }}>goal {STEPG.toLocaleString()}</div>
+          <Bar pct={(day.steps / STEPG) * 100} />
           <div className="mt-3 flex gap-2">
             {[1000, 2000].map((n) => (
               <button key={n} onClick={() => setSteps(day.steps + n)} className="flex-1 rounded-lg py-1.5 text-xs font-semibold" style={{ background: COL.inp, color: "#cfcfd6" }}>+{n}</button>
@@ -912,7 +930,7 @@ export default function PrimeApp() {
   const WorkoutView = (
     <div className="space-y-4">
       <div className="rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
-        <Label>{`Phase ${sched.phase} · Week ${sched.week}/${TOTAL_WEEKS}`}</Label>
+        <Label>{`Phase ${sched.phase} · Week ${sched.week}/${TOTAL_WEEKS} · ${gp.focus}`}</Label>
         <div className="mt-1 text-2xl font-extrabold text-white">{sched.workoutKey ? WORKOUTS[sched.workoutKey].label : "Rest Day"}</div>
         <div className="text-sm" style={{ color: COL.amber }}>{sched.workoutKey ? WORKOUTS[sched.workoutKey].tag : "Recovery"}</div>
       </div>
@@ -924,11 +942,20 @@ export default function PrimeApp() {
               <ExerciseCard
                 key={e.id + "-" + key}
                 e={e}
-                initial={ensureSets(e, day.ex?.[e.id])}
+                initial={ensureSets(e, day.ex?.[e.id], gp.extraSets)}
                 last={lifts[e.id]}
                 onPersist={(sets) => updateEx(e, sets)}
+                restSec={gp.restSec}
               />
             ))}
+          </div>
+
+          <div className="rounded-2xl p-4 space-y-2" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+            <div className="flex items-center gap-2 text-white font-semibold"><Activity size={16} style={{ color: COL.amber }} />Conditioning · {gp.focus}</div>
+            <ul className="text-sm space-y-1" style={{ color: "#8a8a93" }}>
+              {gp.conditioning.map((c, i) => <li key={i}>• {c}</li>)}
+              <li>• Step target today: <span style={{ color: COL.amber }}>{STEPG.toLocaleString()}</span></li>
+            </ul>
           </div>
 
           <div className="rounded-2xl p-4 space-y-2" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -969,6 +996,31 @@ export default function PrimeApp() {
         )}
         <div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={diet} onChange={(v) => updateProfile({ diet: v })} /></div>
       </div>
+
+      {/* auto-composed plan that targets your calories */}
+      {(() => {
+        const auto = composePlan(region, diet, T.calories, T.protein);
+        const pctK = T.calories ? Math.round((auto.totals.kcal / T.calories) * 100) : 0;
+        return (
+          <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.amberDim}` }}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2"><Target size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">Today&apos;s suggested plan</span></div>
+              <button onClick={() => logPlanItems(auto.items)} className="rounded-lg px-3 py-1.5 text-xs font-bold flex items-center gap-1" style={{ background: COL.amber, color: "#000" }}><Plus size={12} /> Log all</button>
+            </div>
+            <div className="text-xs mb-2" style={{ color: "#8a8a93" }}>
+              {Math.round(auto.totals.kcal)} kcal ({pctK}% of {T.calories}) · {Math.round(auto.totals.protein)}g protein
+            </div>
+            <div className="space-y-1.5">
+              {auto.items.map((f) => (
+                <button key={f.slot} onClick={() => setRecipeFood(f)} className="w-full text-left flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                  <span className="text-sm text-white truncate">{MEAL_LABEL[f.slot]}: {f.name}{f.qty > 1 ? ` ×${f.qty}` : ""}</span>
+                  <span className="text-xs shrink-0" style={{ color: "#6b6b73" }}>{f.kcal * f.qty} kcal</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* search any food */}
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -1286,6 +1338,9 @@ export default function PrimeApp() {
         </div>
       )}
 
+      {/* first-run walkthrough */}
+      {showTour && <Tour onClose={() => setShowTour(false)} />}
+
       {/* AI coach */}
       {coach && <CoachSheet context={coachContext} starter={coach.starter} onClose={() => setCoach(null)} />}
 
@@ -1294,6 +1349,7 @@ export default function PrimeApp() {
         <SettingsSheet
           profile={profile} session={session} startDate={startDate} dayNum={dayNum} targets={T}
           onClose={() => setShowSettings(false)}
+          onReplayTour={() => { setShowSettings(false); setShowTour(true); }}
           onUpdate={updateProfile}
           onSignOut={async () => { setShowSettings(false); await supabase.auth.signOut(); }}
           onReset={async () => {
@@ -1342,6 +1398,52 @@ function QuickAdd({ onAdd }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================ APP TOUR / WALKTHROUGH ============================ */
+const TOUR_KEY = "prime-tour-v1";
+const TOUR_STEPS = [
+  { icon: Home, title: "Welcome to PRIME", body: "This quick tour shows the whole app in 30 seconds. Your day starts here: a completion score, your live calorie ring, and quick logs for steps, water, sleep and weight." },
+  { icon: Dumbbell, title: "Workout", body: "Follow the day's plan. Log weight × reps for each set, tick them off, use the built-in rest timer, and tap “Watch demo” for a form video. The plan auto-adjusts to your goal across 28 weeks." },
+  { icon: UtensilsCrossed, title: "Diet & recipes", body: "Get an auto-plan that hits your calorie target, tap any meal for the full recipe, search foods, and track calories & macros live. Indian North/South, veg or non-veg." },
+  { icon: TrendingUp, title: "Progress", body: "Your weight trend, BMI, streaks and a completion calendar — plus private progress photos you can upload every couple of weeks." },
+  { icon: Sparkles, title: "Your AI Coach", body: "Tap the spark ✨ up top anytime for a weekly check-in, dinner ideas within your macros, or plateau help — it already knows your goal and progress." },
+  { icon: Smartphone, title: "Install it like an app", body: "Add PRIME to your home screen so it opens full-screen, works offline and feels native:", install: true },
+];
+
+function Tour({ onClose }) {
+  const [i, setI] = useState(0);
+  const step = TOUR_STEPS[i];
+  const last = i === TOUR_STEPS.length - 1;
+  const Icon = step.icon;
+  const finish = () => { try { localStorage.setItem(TOUR_KEY, "1"); } catch (e) {} onClose(); };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-5" style={{ background: "rgba(0,0,0,0.78)" }}>
+      <div className="w-full rounded-3xl p-6" style={{ maxWidth: 420, background: COL.card, border: `1px solid ${COL.line}` }}>
+        <div className="flex gap-1.5 mb-5">
+          {TOUR_STEPS.map((_, idx) => (
+            <div key={idx} className="flex-1 rounded-full" style={{ height: 4, background: idx <= i ? COL.amber : COL.line }} />
+          ))}
+        </div>
+        <div className="flex items-center justify-center mb-4" style={{ width: 56, height: 56, borderRadius: 16, background: COL.inp, border: `1px solid ${COL.line}`, margin: "0 auto" }}>
+          <Icon size={26} style={{ color: COL.amber }} />
+        </div>
+        <div className="text-center text-2xl font-extrabold text-white">{step.title}</div>
+        <div className="text-center text-sm mt-2" style={{ color: "#9a9aa3", lineHeight: 1.6 }}>{step.body}</div>
+        {step.install && <div className="mt-4"><InstallGuide /></div>}
+        <div className="mt-6 flex items-center gap-3">
+          {i > 0 ? (
+            <button onClick={() => setI(i - 1)} className="rounded-xl py-3 px-4 font-bold" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>Back</button>
+          ) : (
+            <button onClick={finish} className="rounded-xl py-3 px-4 font-semibold" style={{ background: "transparent", color: "#8a8a93" }}>Skip</button>
+          )}
+          <button onClick={() => (last ? finish() : setI(i + 1))} className="flex-1 rounded-xl py-3 font-bold uppercase" style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>
+            {last ? "Start tracking" : "Next"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1424,7 +1526,7 @@ function CoachSheet({ context, starter, onClose }) {
 }
 
 /* ============================ SETTINGS / PROFILE ============================ */
-function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset }) {
+function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset, onReplayTour }) {
   const num = (v) => (v === "" || v === null || isNaN(parseFloat(v)) ? "" : parseFloat(v));
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
@@ -1489,6 +1591,9 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
 
           <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
 
+          <button onClick={onReplayTour} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+            <Smartphone size={16} /> Replay tutorial &amp; install guide
+          </button>
           <button onClick={onSignOut} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
             <LogOut size={16} /> Sign out
           </button>

@@ -17,6 +17,9 @@ function pick(obj, keys) {
   for (const k of keys) if (obj && obj[k]) return obj[k];
   return null;
 }
+function norm(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\b(the|a|an|with|and|or|for)\b/g, " ").replace(/\s+/g, " ").trim();
+}
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
@@ -27,9 +30,9 @@ export async function GET(req) {
   const q = encodeURIComponent(name);
   // The exact search path varies by deployment — try the known shapes in order.
   const candidates = [
-    `https://${HOST}/api/v1/exercises/search?q=${q}&limit=6`,
-    `https://${HOST}/api/v1/exercises?search=${q}&limit=6`,
-    `https://${HOST}/api/v1/exercises?name=${q}&limit=6`,
+    `https://${HOST}/api/v1/exercises/search?q=${q}&limit=15`,
+    `https://${HOST}/api/v1/exercises?search=${q}&limit=15`,
+    `https://${HOST}/api/v1/exercises?name=${q}&limit=15`,
   ];
   const headers = { "x-rapidapi-key": KEY, "x-rapidapi-host": HOST, "Content-Type": "application/json" };
 
@@ -44,12 +47,16 @@ export async function GET(req) {
     }
     if (!list || !list.length) return Response.json({ found: false });
 
-    const lower = name.toLowerCase();
-    const first = lower.split(" ")[0];
-    const best =
-      list.find((e) => (e.name || "").toLowerCase() === lower) ||
-      list.find((e) => (e.name || "").toLowerCase().includes(first)) ||
-      list[0];
+    // Confident match only: every meaningful word of the query must appear in the
+    // candidate's name. Prefer an exact match, else the shortest qualifying name.
+    const words = norm(name).split(" ").filter((w) => w.length > 2);
+    const qExact = norm(name);
+    const qualified = list
+      .map((e) => ({ e, n: norm(e.name) }))
+      .filter(({ n }) => n && words.every((w) => n.includes(w)));
+    const exact = qualified.find(({ n }) => n === qExact);
+    const best = (exact || qualified.sort((a, b) => a.n.length - b.n.length)[0] || {}).e;
+    if (!best) return Response.json({ found: false }); // no confident match → client uses the video link
 
     const image = pick(best, ["gifUrl", "imageUrl", "gif", "image"]);
     const video = pick(best, ["videoUrl", "video"]);

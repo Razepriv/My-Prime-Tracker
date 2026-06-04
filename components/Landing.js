@@ -5,8 +5,9 @@ import {
   Home, Dumbbell, UtensilsCrossed, TrendingUp, Flame, Footprints, Droplets,
   Moon, Scale, Play, Check, Camera, Settings, ChevronLeft, ChevronRight,
   Plus, Leaf, ArrowRight, Flame as FlameIcon, Apple, Video, BarChart3,
-  UserCog, ShieldCheck,
+  UserCog, ShieldCheck, Smartphone,
 } from "lucide-react";
+import InstallGuide from "@/components/InstallGuide";
 
 const COL = {
   bg: "#0a0a0c", card: "#141417", line: "#26262b", amber: "#f5b301",
@@ -425,6 +426,31 @@ function HowItWorks() {
   );
 }
 
+function InstallSection() {
+  return (
+    <section id="install" style={{ maxWidth: 1120, margin: "0 auto", padding: "40px 20px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 40, alignItems: "center", justifyContent: "center" }}>
+        <Reveal style={{ flex: "1 1 320px", minWidth: 300, maxWidth: 480 }}>
+          <div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 7, color: COL.amber, fontWeight: 800, fontSize: 12, letterSpacing: ".14em", textTransform: "uppercase", border: `1px solid ${COL.line}`, borderRadius: 99, padding: "4px 11px" }}>
+              <Smartphone size={13} /> Install
+            </div>
+            <h2 style={{ color: "#fff", fontWeight: 900, fontSize: "clamp(24px,4vw,34px)", margin: "14px 0 0", letterSpacing: "-.02em" }}>Add PRIME to your home screen</h2>
+            <p style={{ color: COL.dim, fontSize: 15.5, lineHeight: 1.6, marginTop: 12 }}>
+              No app store needed. Install straight from your browser — it opens full-screen, works offline, and feels like a native app. Here&apos;s how on iPhone and Android:
+            </p>
+          </div>
+        </Reveal>
+        <Reveal delay={120} style={{ flex: "0 1 380px", minWidth: 280, width: "100%" }}>
+          <div style={{ background: COL.card, border: `1px solid ${COL.line}`, borderRadius: 18, padding: 20 }}>
+            <InstallGuide />
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 function CTA() {
   return (
     <section style={{ padding: "20px 20px 80px" }}>
@@ -460,6 +486,7 @@ export default function Landing() {
       <Features />
       <Showcase />
       <HowItWorks />
+      <InstallSection />
       <CTA />
       <Footer />
     </div>
