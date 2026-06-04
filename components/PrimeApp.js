@@ -96,6 +96,28 @@ async function authHeaders() {
   } catch (e) { return {}; }
 }
 
+// Downscale a chosen photo to a small JPEG data URL (keeps payloads light).
+function fileToScaledDataURL(file, max = 768, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        try { resolve(canvas.toDataURL("image/jpeg", quality)); } catch (e) { reject(e); }
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 // Fire a system notification (via the service worker when possible). No-op
 // unless the user has granted permission.
 function notify(title, body) {
@@ -654,12 +676,14 @@ export default function PrimeApp() {
   const [syncErr, setSyncErr] = useState(false);
   const [dietQuery, setDietQuery] = useState("");
   const [showScan, setShowScan] = useState(false);
+  const [showMeal, setShowMeal] = useState(false);
   const [analysis, setAnalysis] = useState({ busy: false, text: null });
   const [coach, setCoach] = useState(null); // null | { starter }
   const [showTour, setShowTour] = useState(false);
   const [achievements, setAchievements] = useState([]);
   const [achToast, setAchToast] = useState(null);
   const [recovery, setRecovery] = useState(false);
+  const [recent, setRecent] = useState([]);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience) });
@@ -695,7 +719,7 @@ export default function PrimeApp() {
     if (!session) { setProfile(null); setDataLoading(false); return; }
     setDataLoading(true);
     (async () => {
-      const core = await sGetMany(["prime-profile", "prime-weights", "prime-lifts", "prime-complete", "prime-achievements"]);
+      const core = await sGetMany(["prime-profile", "prime-weights", "prime-lifts", "prime-complete", "prime-achievements", "prime-recent"]);
       const p = core["prime-profile"];
       if (p) {
         setProfile(p);
@@ -703,6 +727,7 @@ export default function PrimeApp() {
         setLifts(core["prime-lifts"] || {});
         setComplete(core["prime-complete"] || []);
         setAchievements(core["prime-achievements"] || []);
+        setRecent(core["prime-recent"] || []);
         loadPhotos();
         loadHistory();
       } else {
@@ -812,6 +837,12 @@ export default function PrimeApp() {
   const addFood = (f, slot) => {
     const item = { fid: f.id || null, name: f.name, kcal: f.kcal || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0, qty: 1, slot: slot || f.meal || "snack" };
     saveDay({ ...day, food: [...(day.food || []), item] });
+    setRecent((prev) => {
+      const snap = { name: item.name, kcal: item.kcal, protein: item.protein, carbs: item.carbs, fat: item.fat, meal: item.slot };
+      const next = [snap, ...prev.filter((r) => r.name !== snap.name)].slice(0, 10);
+      sSet("prime-recent", next);
+      return next;
+    });
   };
   const logPlanItems = (planItems) => {
     const add = planItems.map((f) => ({ fid: f.id, name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, qty: f.qty || 1, slot: f.slot || f.meal || "snack" }));
@@ -1221,6 +1252,19 @@ export default function PrimeApp() {
     <div className="space-y-4">
       {NutritionCard}
 
+      {recent.length > 0 && (
+        <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+          <Label>Quick log · recent</Label>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {recent.map((r, i) => (
+              <button key={i} onClick={() => addFood(r, r.meal)} className="rounded-full px-3 py-1.5 text-xs flex items-center gap-1" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+                <Plus size={11} style={{ color: COL.amber }} /> {r.name.length > 24 ? r.name.slice(0, 24) + "…" : r.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
         <div className="flex items-center justify-between">
           <Label>Cuisine & diet</Label>
@@ -1288,9 +1332,14 @@ export default function PrimeApp() {
         <Label>Search foods</Label>
         <input value={dietQuery} onChange={(e) => setDietQuery(e.target.value)} placeholder="e.g. paneer, banana, biryani…"
           className="mt-2 w-full rounded-xl px-3 py-2.5 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
-        <button onClick={() => setShowScan(true)} className="mt-2 w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
-          <ScanLine size={15} /> Scan a packaged food barcode
-        </button>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button onClick={() => setShowMeal(true)} className="rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5" style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
+            <Sparkles size={15} /> Snap a meal
+          </button>
+          <button onClick={() => setShowScan(true)} className="rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-1.5" style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
+            <ScanLine size={15} /> Scan barcode
+          </button>
+        </div>
         {dietQuery.trim() && (
           <div className="mt-3 space-y-2">
             {searchFoods(dietQuery).length === 0 ? (
@@ -1645,6 +1694,9 @@ export default function PrimeApp() {
       {/* first-run walkthrough */}
       {showTour && <Tour onClose={() => setShowTour(false)} />}
 
+      {/* AI meal photo */}
+      {showMeal && <MealPhotoModal onAdd={(f) => addFood(f, "snack")} onClose={() => setShowMeal(false)} />}
+
       {/* barcode scanner */}
       {showScan && <BarcodeModal onAdd={(f) => addFood(f, "snack")} onClose={() => setShowScan(false)} />}
 
@@ -1677,11 +1729,74 @@ export default function PrimeApp() {
                 if (meta.length) await supabase.storage.from("progress").remove(meta.map((m) => m.path));
               } catch (e) {}
               await clearAll();
-              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setHistory([]); setAchievements([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
+              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setHistory([]); setAchievements([]); setRecent([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
             }
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ============================ AI MEAL PHOTO ============================ */
+function MealPhotoModal({ onAdd, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [est, setEst] = useState(null);
+  const [preview, setPreview] = useState(null);
+
+  const pick = async (file) => {
+    if (!file) return;
+    setBusy(true); setMsg(null); setEst(null);
+    try {
+      const dataUrl = await fileToScaledDataURL(file);
+      setPreview(dataUrl);
+      const r = await fetch("/api/meal-photo", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ image: dataUrl }) });
+      const j = await r.json();
+      if (j.food) setEst(j.food); else setMsg(j.error || "Couldn't analyze this photo.");
+    } catch (e) { setMsg("Couldn't process the photo — try another."); }
+    setBusy(false);
+  };
+  const field = (k, label, w) => (
+    <div style={{ width: w }}>
+      <div className="text-xs mb-1" style={{ color: "#6b6b73" }}>{label}</div>
+      <Input value={est[k]} onChange={(e) => setEst({ ...est, [k]: k === "name" ? e.target.value : (parseFloat(e.target.value) || 0) })} inputMode={k === "name" ? "text" : "numeric"} />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
+      <div className="w-full p-5 rounded-t-3xl overflow-y-auto" style={{ maxWidth: 480, maxHeight: "88vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2"><Sparkles size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">Snap a meal</div></div>
+          <button aria-label="Close" onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
+        </div>
+
+        {preview && <img src={preview} alt="meal" style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 14, marginBottom: 10 }} />}
+
+        {!est && (
+          <label className="w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}>
+            <Camera size={16} /> {busy ? "Analyzing…" : preview ? "Try another photo" : "Take / choose a photo"}
+            <input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
+          </label>
+        )}
+        {msg && <div className="text-xs mt-2" style={{ color: "#ff8a8a" }}>{msg}</div>}
+
+        {est && (
+          <div className="mt-1">
+            <div className="text-xs mb-2" style={{ color: "#8a8a93" }}>AI estimate — tweak if needed, then log it.</div>
+            <div className="space-y-2">
+              {field("name", "Meal", "100%")}
+              <div className="flex gap-2">
+                {field("kcal", "kcal", "25%")}{field("protein", "Protein (g)", "25%")}{field("carbs", "Carbs (g)", "25%")}{field("fat", "Fat (g)", "25%")}
+              </div>
+            </div>
+            <button onClick={() => { onAdd(est); onClose(); }} className="mt-3 w-full rounded-xl py-3 font-bold flex items-center justify-center gap-2" style={{ background: COL.amber, color: "#000" }}><Plus size={16} /> Log this meal</button>
+            <div className="text-xs mt-2" style={{ color: "#6b6b73" }}>Estimates are approximate — adjust portions to match what you ate.</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
