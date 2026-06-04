@@ -34,6 +34,19 @@ Takes about 20–30 minutes the first time.
 > storage bucket for photos. If you set the project up earlier, just **re-run the
 > script** to add it.
 
+### Optional integrations (server-side env vars)
+
+Both are optional — the app works without them and degrades gracefully.
+
+| Variable | Enables | Where to get it |
+|----------|---------|-----------------|
+| `RAPIDAPI_KEY` | Real exercise **GIFs + videos** on the Workout screen (else a YouTube demo link is used) | RapidAPI → *ExerciseDB / EDB with videos and images by AscendAPI* |
+| `GROQ_API_KEY` | The **AI coach** (weekly check-ins, meal ideas, plateau help) | https://console.groq.com/keys |
+
+Add them in **Vercel → Project → Settings → Environment Variables** (NOT prefixed
+with `NEXT_PUBLIC` — they stay server-side) and redeploy. Optional model override:
+`GROQ_MODEL` (default `llama-3.3-70b-versatile`).
+
 ---
 
 ## STEP 1 — Put this code on GitHub

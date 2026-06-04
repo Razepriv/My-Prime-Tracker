@@ -7,6 +7,7 @@ import {
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
   Play, Upload, Trash2, User, Activity, Leaf, Beef, Timer, RotateCcw,
+  Sparkles, Send,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
@@ -510,6 +511,7 @@ export default function PrimeApp() {
   const [recipeFood, setRecipeFood] = useState(null);
   const [syncErr, setSyncErr] = useState(false);
   const [dietQuery, setDietQuery] = useState("");
+  const [coach, setCoach] = useState(null); // null | { starter }
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween);
@@ -735,6 +737,17 @@ export default function PrimeApp() {
   const diet = profile.diet || "both";
   const plan = buildPlan(region, diet);
 
+  const coachContext = [
+    `Name: ${profile.name || "(none)"}; sex ${profile.sex}; age ${profile.age}; height ${profile.heightCm}cm.`,
+    `Goal: ${(GOALS[profile.goal] || {}).label}. Diet: ${diet}. Cuisine: ${profile.country === "india" ? region + " Indian" : "other"}.`,
+    `Current weight ${latestWeight}kg, goal ${profile.goalWeight}kg, BMI ${bmi(latestWeight, profile.heightCm)}.`,
+    `Daily targets: ${T.calories} kcal, ${T.protein}g protein, ${T.carbs}g carbs, ${T.fat}g fat${T.adaptive ? " (adaptive/measured)" : " (formula)"}; maintenance≈${T.tdee}.`,
+    useAdaptive
+      ? `Weight trend ${adaptive.trend.slopePerWeek >= 0 ? "+" : ""}${adaptive.trend.slopePerWeek.toFixed(2)} kg/wk over ${adaptive.intake.days} logged days; avg intake ${adaptive.intake.avg} kcal.`
+      : `Not enough data for adaptive targets yet (${adaptive.intake.days} logged days).`,
+    `Today so far: ${Math.round(consumed.kcal)} kcal, ${Math.round(consumed.protein)}g protein. Streak ${streak} days. Program week ${Math.max(0, sched.week)}/${TOTAL_WEEKS}.`,
+  ].join(" ");
+
   /* ============================ NUTRITION CARD ============================ */
   const NutritionCard = (
     <div className="rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -790,6 +803,16 @@ export default function PrimeApp() {
 
       {NutritionCard}
       {AdaptiveCard}
+
+      <button onClick={() => setCoach({ starter: "Give me a short weekly check-in: am I on track for my goal, and what 1–2 things should I adjust this week?" })}
+        className="w-full text-left rounded-2xl p-4 flex items-center gap-3" style={{ background: "linear-gradient(135deg, rgba(245,179,1,.12), rgba(245,179,1,.02))", border: `1px solid ${COL.amberDim}` }}>
+        <Sparkles size={20} style={{ color: COL.amber }} />
+        <div className="flex-1">
+          <div className="font-bold text-white">Ask PRIME Coach</div>
+          <div className="text-sm" style={{ color: "#9a9aa3" }}>Weekly check-in, meal ideas, plateau help — tailored to your data.</div>
+        </div>
+        <ChevronRight size={18} style={{ color: "#6b6b73" }} />
+      </button>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -1169,7 +1192,10 @@ export default function PrimeApp() {
             <div className="text-xl font-extrabold text-white uppercase" style={{ letterSpacing: "0.06em" }}>
               {profile.name ? `${profile.name}'s ` : ""}<span style={{ color: COL.amber }}>Prime</span>
             </div>
-            <button onClick={() => setShowSettings(true)} style={{ color: "#8a8a93" }}><Settings size={20} /></button>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setCoach({ starter: null })} style={{ color: COL.amber }} aria-label="AI coach"><Sparkles size={20} /></button>
+              <button onClick={() => setShowSettings(true)} style={{ color: "#8a8a93" }} aria-label="Settings"><Settings size={20} /></button>
+            </div>
           </div>
           <div className="mt-3 flex items-center justify-between">
             <button onClick={() => setSelDate(addDays(selDate, -1))} className="p-2 rounded-lg" style={{ background: COL.card }}><ChevronLeft size={18} color="#cfcfd6" /></button>
@@ -1260,6 +1286,9 @@ export default function PrimeApp() {
         </div>
       )}
 
+      {/* AI coach */}
+      {coach && <CoachSheet context={coachContext} starter={coach.starter} onClose={() => setCoach(null)} />}
+
       {/* settings / profile sheet */}
       {showSettings && (
         <SettingsSheet
@@ -1313,6 +1342,83 @@ function QuickAdd({ onAdd }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ============================ AI COACH (Groq) ============================ */
+const COACH_SUGGESTIONS = [
+  "Give me a quick weekly check-in.",
+  "What should I eat for dinner tonight?",
+  "Am I losing weight too fast or too slow?",
+  "How do I break my plateau?",
+];
+function CoachSheet({ context, starter, onClose }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scroller = useRef(null);
+
+  const send = async (text) => {
+    const content = (text ?? input).trim();
+    if (!content || busy) return;
+    const next = [...messages, { role: "user", content }];
+    setMessages(next); setInput(""); setBusy(true);
+    try {
+      const r = await fetch("/api/coach", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ context, messages: next }),
+      });
+      const j = await r.json();
+      setMessages((m) => [...m, { role: "assistant", content: j.reply || j.error || "Something went wrong." }]);
+    } catch (e) {
+      setMessages((m) => [...m, { role: "assistant", content: "Couldn't reach the coach — check your connection." }]);
+    }
+    setBusy(false);
+  };
+
+  useEffect(() => { if (starter) send(starter); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; }, [messages, busy]);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
+      <div className="w-full rounded-t-3xl flex flex-col" style={{ maxWidth: 480, height: "82vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4" style={{ borderBottom: `1px solid ${COL.line}` }}>
+          <div className="flex items-center gap-2"><Sparkles size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">PRIME Coach</div></div>
+          <button onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
+        </div>
+
+        <div ref={scroller} className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messages.length === 0 && !busy && (
+            <div className="text-sm" style={{ color: "#8a8a93" }}>Ask me anything about your plan, food or training — I can see your goal, targets and progress.</div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className="flex" style={{ justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+              <div className="rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap" style={{
+                maxWidth: "85%", lineHeight: 1.5,
+                background: m.role === "user" ? COL.amber : COL.inp,
+                color: m.role === "user" ? "#000" : "#e7e7ea",
+                border: m.role === "user" ? "none" : `1px solid ${COL.line}`,
+              }}>{m.content}</div>
+            </div>
+          ))}
+          {busy && <div className="text-sm" style={{ color: COL.amber }}>Coach is thinking…</div>}
+        </div>
+
+        {messages.length === 0 && (
+          <div className="px-4 pb-2 flex flex-wrap gap-2">
+            {COACH_SUGGESTIONS.map((s) => (
+              <button key={s} onClick={() => send(s)} className="rounded-full px-3 py-1.5 text-xs" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{s}</button>
+            ))}
+          </div>
+        )}
+
+        <div className="p-3 flex items-center gap-2" style={{ borderTop: `1px solid ${COL.line}` }}>
+          <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} placeholder="Ask your coach…"
+            className="flex-1 rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+          <button onClick={() => send()} disabled={busy} className="rounded-xl px-4 py-3 font-bold" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}><Send size={16} /></button>
+        </div>
+      </div>
     </div>
   );
 }
