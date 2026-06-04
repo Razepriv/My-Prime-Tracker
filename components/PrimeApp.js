@@ -7,7 +7,7 @@ import {
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
   Play, Upload, Trash2, User, Activity, Leaf, Beef, Timer, RotateCcw,
-  Sparkles, Send, Smartphone, Bell, Trophy,
+  Sparkles, Send, Smartphone, Bell, Trophy, ScanLine, Share2,
 } from "lucide-react";
 import InstallGuide from "@/components/InstallGuide";
 import { ACHIEVEMENTS, evaluate as evalAchievements, meta as achMeta } from "@/lib/achievements";
@@ -644,6 +644,7 @@ export default function PrimeApp() {
   const [recipeFood, setRecipeFood] = useState(null);
   const [syncErr, setSyncErr] = useState(false);
   const [dietQuery, setDietQuery] = useState("");
+  const [showScan, setShowScan] = useState(false);
   const [coach, setCoach] = useState(null); // null | { starter }
   const [showTour, setShowTour] = useState(false);
   const [achievements, setAchievements] = useState([]);
@@ -814,6 +815,14 @@ export default function PrimeApp() {
 
   /* ---- profile editing ---- */
   const updateProfile = (patch) => { const p = { ...profile, ...patch }; setProfile(p); sSet("prime-profile", p); };
+
+  /* ---- share ---- */
+  const shareStreak = async () => {
+    const text = `I'm on a ${streak}-day streak on PRIME Tracker 💪 building my prime physique.`;
+    const url = typeof window !== "undefined" ? window.location.origin : "";
+    try { if (navigator.share) { await navigator.share({ title: "PRIME Tracker", text, url }); return; } } catch (e) { return; }
+    try { window.open(`https://wa.me/?text=${encodeURIComponent(text + " " + url)}`, "_blank"); } catch (e) {}
+  };
 
   /* ---- photos (Supabase Storage) ---- */
   async function loadPhotos() {
@@ -1244,6 +1253,9 @@ export default function PrimeApp() {
         <Label>Search foods</Label>
         <input value={dietQuery} onChange={(e) => setDietQuery(e.target.value)} placeholder="e.g. paneer, banana, biryani…"
           className="mt-2 w-full rounded-xl px-3 py-2.5 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+        <button onClick={() => setShowScan(true)} className="mt-2 w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
+          <ScanLine size={15} /> Scan a packaged food barcode
+        </button>
         {dietQuery.trim() && (
           <div className="mt-3 space-y-2">
             {searchFoods(dietQuery).length === 0 ? (
@@ -1391,6 +1403,12 @@ export default function PrimeApp() {
           <div className="text-xs" style={{ color: "#6b6b73" }}>of {TOTAL_WEEKS} wks</div>
         </div>
       </div>
+
+      {streak >= 1 && (
+        <button onClick={shareStreak} className="w-full rounded-2xl p-3 flex items-center justify-center gap-2 font-semibold" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+          <Share2 size={16} style={{ color: COL.amber }} /> Share my {streak}-day streak
+        </button>
+      )}
 
       {/* progress photos */}
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -1579,6 +1597,9 @@ export default function PrimeApp() {
       {/* first-run walkthrough */}
       {showTour && <Tour onClose={() => setShowTour(false)} />}
 
+      {/* barcode scanner */}
+      {showScan && <BarcodeModal onAdd={(f) => addFood(f, "snack")} onClose={() => setShowScan(false)} />}
+
       {/* AI coach */}
       {coach && <CoachSheet context={coachContext} starter={coach.starter} onClose={() => setCoach(null)} />}
 
@@ -1612,6 +1633,84 @@ export default function PrimeApp() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ============================ BARCODE SCANNER (OpenFoodFacts) ============================ */
+function BarcodeModal({ onAdd, onClose }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+
+  const stop = () => {
+    try { if (rafRef.current) cancelAnimationFrame(rafRef.current); } catch (e) {}
+    try { streamRef.current && streamRef.current.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    setScanning(false);
+  };
+  useEffect(() => () => stop(), []);
+
+  const lookup = async (barcode) => {
+    const bc = (barcode || code).trim();
+    if (!bc) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(bc)}.json?fields=product_name,brands,nutriments`);
+      const j = await r.json();
+      if (j.status !== 1 || !j.product) { setMsg("Product not found. Add it as a custom food instead."); setBusy(false); return; }
+      const n = j.product.nutriments || {};
+      const kcal = Math.round(n["energy-kcal_100g"] || n["energy-kcal"] || 0);
+      if (!kcal) { setMsg("No calorie data for this product."); setBusy(false); return; }
+      const brand = j.product.brands ? ` (${j.product.brands.split(",")[0]})` : "";
+      const food = { name: `${j.product.product_name || "Food"}${brand} · 100g`, kcal, protein: Math.round(n["proteins_100g"] || 0), carbs: Math.round(n["carbohydrates_100g"] || 0), fat: Math.round(n["fat_100g"] || 0) };
+      stop(); onAdd(food); onClose();
+    } catch (e) { setMsg("Lookup failed — check your connection."); }
+    setBusy(false);
+  };
+
+  const startScan = async () => {
+    if (!("BarcodeDetector" in window)) { setMsg("Camera scanning isn't supported in this browser — type the barcode number below."); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      setScanning(true);
+      const det = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"] });
+      const tick = async () => {
+        try { const codes = await det.detect(videoRef.current); if (codes && codes.length) { lookup(codes[0].rawValue); return; } } catch (e) {}
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    } catch (e) { setMsg("Couldn't access the camera — type the barcode number below."); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => { stop(); onClose(); }}>
+      <div className="w-full p-5 rounded-t-3xl" style={{ maxWidth: 480, background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2"><ScanLine size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">Scan a barcode</div></div>
+          <button aria-label="Close" onClick={() => { stop(); onClose(); }} style={{ color: "#8a8a93" }}><X size={20} /></button>
+        </div>
+        {scanning && (
+          <video ref={videoRef} muted playsInline style={{ width: "100%", borderRadius: 14, marginBottom: 10, background: "#000", maxHeight: 240, objectFit: "cover" }} />
+        )}
+        {!scanning && (
+          <button onClick={startScan} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2 mb-3" style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
+            <ScanLine size={16} /> Scan with camera
+          </button>
+        )}
+        <Label>Or enter the barcode number</Label>
+        <div className="mt-2 flex gap-2">
+          <Input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" placeholder="e.g. 8901234567890" />
+          <button onClick={() => lookup()} disabled={busy} className="rounded-xl px-4 font-bold" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "Look up"}</button>
+        </div>
+        {msg && <div className="text-xs mt-2" style={{ color: "#ff8a8a" }}>{msg}</div>}
+        <div className="text-xs mt-3" style={{ color: "#6b6b73" }}>Powered by Open Food Facts — values are per 100 g; adjust quantity in your log.</div>
+      </div>
     </div>
   );
 }
