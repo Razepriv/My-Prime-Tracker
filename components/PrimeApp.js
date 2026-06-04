@@ -645,6 +645,7 @@ export default function PrimeApp() {
   const [syncErr, setSyncErr] = useState(false);
   const [dietQuery, setDietQuery] = useState("");
   const [showScan, setShowScan] = useState(false);
+  const [analysis, setAnalysis] = useState({ busy: false, text: null });
   const [coach, setCoach] = useState(null); // null | { starter }
   const [showTour, setShowTour] = useState(false);
   const [achievements, setAchievements] = useState([]);
@@ -822,6 +823,19 @@ export default function PrimeApp() {
     const url = typeof window !== "undefined" ? window.location.origin : "";
     try { if (navigator.share) { await navigator.share({ title: "PRIME Tracker", text, url }); return; } } catch (e) { return; }
     try { window.open(`https://wa.me/?text=${encodeURIComponent(text + " " + url)}`, "_blank"); } catch (e) {}
+  };
+
+  const analyzeProgress = async () => {
+    setAnalysis({ busy: true, text: null });
+    try {
+      const imgs = photos.slice().reverse().slice(0, 2).map((p) => p.url).filter(Boolean);
+      const r = await fetch("/api/progress-analysis", {
+        method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({ context: coachContext, images: imgs }),
+      });
+      const j = await r.json();
+      setAnalysis({ busy: false, text: j.analysis || j.error || "Couldn't analyze right now." });
+    } catch (e) { setAnalysis({ busy: false, text: "Couldn't reach the analyzer — check your connection." }); }
   };
 
   /* ---- photos (Supabase Storage) ---- */
@@ -1435,6 +1449,19 @@ export default function PrimeApp() {
           </div>
         )}
       </div>
+
+      {photos.length >= 1 && (
+        <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+          <div className="flex items-center gap-2 mb-2"><Sparkles size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">AI progress analysis</span></div>
+          <button onClick={analyzeProgress} disabled={analysis.busy} className="w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2" style={{ background: COL.amber, color: "#000", opacity: analysis.busy ? 0.6 : 1 }}>
+            <Sparkles size={15} /> {analysis.busy ? "Analyzing your photos…" : "Analyze my progress"}
+          </button>
+          {analysis.text && (
+            <div className="mt-2 rounded-xl p-3 text-sm whitespace-pre-wrap" style={{ background: COL.inp, border: `1px solid ${COL.line}`, color: "#cfcfd6", lineHeight: 1.55 }}>{analysis.text}</div>
+          )}
+          <div className="text-xs mt-2" style={{ color: "#6b6b73" }}>Uses your latest photos + weight trend. Photos are sent securely for this analysis only.</div>
+        </div>
+      )}
 
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
         <div className="flex items-center justify-between mb-3">
