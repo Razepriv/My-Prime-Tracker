@@ -33,3 +33,7 @@ html { scroll-behavior: smooth; }
   .float-a, .float-b { animation: none; }
   html { scroll-behavior: auto; }
 }
+
+/* visible keyboard focus for accessibility (mouse clicks stay clean) */
+:focus-visible { outline: 2px solid #f5b301; outline-offset: 2px; border-radius: 6px; }
+button:focus:not(:focus-visible), a:focus:not(:focus-visible) { outline: none; }

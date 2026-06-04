@@ -333,6 +333,15 @@ function Onboarding({ onDone }) {
   const set = (k, v) => setP((prev) => ({ ...prev, [k]: v }));
   const steps = ["About you", "Your body", "Your goal", "Training", "Your food"];
   const today = dateKey(new Date());
+  const valid = (() => {
+    if (step === 0) { const a = parseFloat(p.age); return a >= 13 && a <= 100; }
+    if (step === 1) {
+      const h = parseFloat(p.heightCm), sw = parseFloat(p.startWeight), gw = parseFloat(p.goalWeight);
+      return h >= 120 && h <= 230 && sw >= 30 && sw <= 300 && gw >= 30 && gw <= 300;
+    }
+    if (step === 2) { const m = parseFloat(p.goalMonths); return m >= 1 && m <= 60; }
+    return true;
+  })();
   const t = targets(
     { ...p, sex: p.sex, age: p.age, heightCm: p.heightCm, activity: p.activity, goal: p.goal },
     p.startWeight
@@ -479,8 +488,8 @@ function Onboarding({ onDone }) {
               style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>Back</button>
           )}
           {step < steps.length - 1 ? (
-            <button onClick={() => setStep(step + 1)} className="flex-1 rounded-xl py-3.5 font-bold uppercase"
-              style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>Next</button>
+            <button onClick={() => valid && setStep(step + 1)} disabled={!valid} className="flex-1 rounded-xl py-3.5 font-bold uppercase"
+              style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em", opacity: valid ? 1 : 0.45 }}>Next</button>
           ) : (
             <button onClick={finish} className="flex-1 rounded-xl py-3.5 font-bold uppercase"
               style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>Start my journey</button>
@@ -579,7 +588,7 @@ function ExerciseCard({ e, initial, last, onPersist, restSec = 90 }) {
   return (
     <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${allDone ? COL.amberDim : COL.line}` }}>
       <div className="flex items-start gap-3">
-        <button onClick={toggleAll} className="mt-0.5 flex items-center justify-center shrink-0"
+        <button aria-label={allDone ? "Mark all sets not done" : "Mark all sets done"} onClick={toggleAll} className="mt-0.5 flex items-center justify-center shrink-0"
           style={{ width: 26, height: 26, borderRadius: 8, background: allDone ? COL.amber : COL.inp, border: `1px solid ${allDone ? COL.amber : COL.line}` }}>
           {allDone && <Check size={16} color="#000" strokeWidth={3} />}
         </button>
@@ -605,7 +614,7 @@ function ExerciseCard({ e, initial, last, onPersist, restSec = 90 }) {
                   className="rounded-lg px-2 py-1.5 text-sm text-white outline-none w-full" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
                 <input value={s.reps} onChange={(ev) => setField(i, "reps", ev.target.value)} onBlur={blurPersist} inputMode="numeric" placeholder="reps"
                   className="rounded-lg px-2 py-1.5 text-sm text-white outline-none w-full" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
-                <button onClick={() => toggleSet(i)} className="flex items-center justify-center"
+                <button aria-label={`Set ${i + 1} ${s.done ? "done" : "not done"}`} onClick={() => toggleSet(i)} className="flex items-center justify-center"
                   style={{ width: 28, height: 28, borderRadius: 7, background: s.done ? COL.amber : COL.inp, border: `1px solid ${s.done ? COL.amber : COL.line}` }}>
                   {s.done && <Check size={14} color="#000" strokeWidth={3} />}
                 </button>
@@ -816,6 +825,18 @@ export default function PrimeApp() {
 
   /* ---- profile editing ---- */
   const updateProfile = (patch) => { const p = { ...profile, ...patch }; setProfile(p); sSet("prime-profile", p); };
+
+  /* ---- export all my data (no lock-in) ---- */
+  const exportData = async () => {
+    try {
+      const { data } = await supabase.from("user_data").select("key,value");
+      const blob = new Blob([JSON.stringify({ app: "PRIME Tracker", exportedAt: new Date().toISOString(), data: data || [] }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "prime-tracker-data.json"; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e) {}
+  };
 
   /* ---- share ---- */
   const shareStreak = async () => {
@@ -1048,7 +1069,7 @@ export default function PrimeApp() {
           <div className="text-2xl font-extrabold text-white mb-2">{day.water}<span className="text-base" style={{ color: "#6b6b73" }}>/{WATER_GOAL}</span></div>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {Array.from({ length: WATER_GOAL }).map((_, i) => (
-              <button key={i} onClick={() => setWater(i + 1 === day.water ? i : i + 1)}
+              <button key={i} aria-label={`Set water to ${i + 1} glasses`} onClick={() => setWater(i + 1 === day.water ? i : i + 1)}
                 style={{ width: 18, height: 24, borderRadius: 4, background: i < day.water ? COL.amber : COL.inp, border: `1px solid ${COL.line}` }} />
             ))}
           </div>
@@ -1443,7 +1464,7 @@ export default function PrimeApp() {
               <div key={p.path} className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "3/4", background: COL.inp }}>
                 {p.url ? <img src={p.url} alt={p.date} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div className="flex items-center justify-center h-full text-xs" style={{ color: "#6b6b73" }}>…</div>}
                 <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 text-xs" style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}>Wk {p.week}</div>
-                <button onClick={() => deletePhoto(p)} className="absolute top-1 right-1 rounded-md p-1" style={{ background: "rgba(0,0,0,0.6)", color: "#ff8a8a" }}><Trash2 size={12} /></button>
+                <button aria-label="Delete photo" onClick={() => deletePhoto(p)} className="absolute top-1 right-1 rounded-md p-1" style={{ background: "rgba(0,0,0,0.6)", color: "#ff8a8a" }}><Trash2 size={12} /></button>
               </div>
             ))}
           </div>
@@ -1587,7 +1608,7 @@ export default function PrimeApp() {
           <div className="w-full p-5 rounded-t-3xl overflow-y-auto" style={{ maxWidth: 480, maxHeight: "85vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-1">
               <div className="text-xl font-extrabold text-white">{recipeFood.name}</div>
-              <button onClick={() => setRecipeFood(null)} style={{ color: "#8a8a93" }}><X size={22} /></button>
+              <button aria-label="Close recipe" onClick={() => setRecipeFood(null)} style={{ color: "#8a8a93" }}><X size={22} /></button>
             </div>
             <div className="text-xs mb-3" style={{ color: "#8a8a93" }}>{recipeFood.serving}</div>
             <div className="grid grid-cols-4 gap-2 mb-4">
@@ -1646,6 +1667,7 @@ export default function PrimeApp() {
           profile={profile} session={session} startDate={startDate} dayNum={dayNum} targets={T}
           onClose={() => setShowSettings(false)}
           onReplayTour={() => { setShowSettings(false); setShowTour(true); }}
+          onExport={exportData}
           onUpdate={updateProfile}
           onSignOut={async () => { setShowSettings(false); await supabase.auth.signOut(); }}
           onReset={async () => {
@@ -1861,7 +1883,7 @@ function CoachSheet({ context, starter, onClose }) {
       <div className="w-full rounded-t-3xl flex flex-col" style={{ maxWidth: 480, height: "82vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-4" style={{ borderBottom: `1px solid ${COL.line}` }}>
           <div className="flex items-center gap-2"><Sparkles size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">PRIME Coach</div></div>
-          <button onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
+          <button aria-label="Close" onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
         </div>
 
         <div ref={scroller} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -1892,7 +1914,7 @@ function CoachSheet({ context, starter, onClose }) {
         <div className="p-3 flex items-center gap-2" style={{ borderTop: `1px solid ${COL.line}` }}>
           <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} placeholder="Ask your coach…"
             className="flex-1 rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
-          <button onClick={() => send()} disabled={busy} className="rounded-xl px-4 py-3 font-bold" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}><Send size={16} /></button>
+          <button aria-label="Send message" onClick={() => send()} disabled={busy} className="rounded-xl px-4 py-3 font-bold" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}><Send size={16} /></button>
         </div>
       </div>
     </div>
@@ -1964,14 +1986,14 @@ function NotifSettings({ profile, onUpdate }) {
 }
 
 /* ============================ SETTINGS / PROFILE ============================ */
-function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset, onReplayTour }) {
+function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset, onReplayTour, onExport }) {
   const num = (v) => (v === "" || v === null || isNaN(parseFloat(v)) ? "" : parseFloat(v));
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div className="w-full p-5 rounded-t-3xl overflow-y-auto" style={{ maxWidth: 480, maxHeight: "90vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2"><User size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">Profile & Settings</div></div>
-          <button onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
+          <button aria-label="Close" onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
         </div>
 
         <div className="rounded-xl p-3 mb-4" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
@@ -2060,6 +2082,9 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
           </button>
           <button onClick={onReplayTour} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
             <Smartphone size={16} /> Replay tutorial &amp; install guide
+          </button>
+          <button onClick={onExport} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+            <Upload size={16} /> Export my data (JSON)
           </button>
           <button onClick={onSignOut} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
             <LogOut size={16} /> Sign out
