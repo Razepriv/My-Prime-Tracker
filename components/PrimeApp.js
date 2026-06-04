@@ -331,6 +331,36 @@ function Onboarding({ onDone }) {
 
 function blankDay() { return { steps: 0, water: 0, sleep: "", weight: "", ex: {}, food: [], notes: "" }; }
 
+/* ===== exercise media (gif + video) from the ExerciseDB proxy, with fallback ===== */
+const EX_MEDIA_CACHE = {};
+function ExerciseMedia({ name, fallbackHref }) {
+  const [m, setM] = useState(EX_MEDIA_CACHE[name]);
+  useEffect(() => {
+    let on = true;
+    if (EX_MEDIA_CACHE[name] !== undefined) { setM(EX_MEDIA_CACHE[name]); return; }
+    fetch("/api/exercise?name=" + encodeURIComponent(name))
+      .then((r) => r.json())
+      .then((d) => { EX_MEDIA_CACHE[name] = d; if (on) setM(d); })
+      .catch(() => { EX_MEDIA_CACHE[name] = { found: false }; if (on) setM({ found: false }); });
+    return () => { on = false; };
+  }, [name]);
+
+  const videoHref = (m && m.found && m.video) ? m.video : fallbackHref;
+  return (
+    <div>
+      {m && m.found && m.image && (
+        <img src={m.image} alt={name} loading="lazy" onError={(ev) => { ev.currentTarget.style.display = "none"; }}
+          style={{ width: "100%", maxHeight: 200, objectFit: "contain", borderRadius: 12, marginTop: 8, background: "#000" }} />
+      )}
+      <a href={videoHref} target="_blank" rel="noreferrer"
+        className="mt-2 inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold"
+        style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
+        <Play size={12} /> {(m && m.found && m.video) ? "Watch video" : "Watch demo"}
+      </a>
+    </div>
+  );
+}
+
 /* ============================ MAIN APP ============================ */
 export default function PrimeApp() {
   const [session, setSession] = useState(null);
@@ -710,21 +740,13 @@ export default function PrimeApp() {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-white leading-tight">{e.name}</div>
                       <div className="text-xs" style={{ color: COL.amber }}>{e.muscle} · {e.sets}</div>
-                      {e.gif && (
-                        <img src={e.gif} alt={e.name} loading="lazy" onError={(ev) => { ev.currentTarget.style.display = "none"; }}
-                          style={{ width: "100%", maxHeight: 180, objectFit: "contain", borderRadius: 12, marginTop: 8, background: "#000" }} />
-                      )}
                       {e.cue && <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>{e.cue}</div>}
+                      <ExerciseMedia name={e.name} fallbackHref={demoUrl(e.name)} />
                       <div className="mt-2 flex items-center gap-2 flex-wrap">
                         <span className="text-xs" style={{ color: "#6b6b73" }}>Weight</span>
                         <input value={st.weight || ""} onChange={(ev) => setExWeight(e.id, ev.target.value)} inputMode="decimal" placeholder="kg"
                           className="w-20 rounded-lg px-2 py-1 text-sm text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
                         {last && last.weight ? (<span className="text-xs" style={{ color: COL.amber }}>last: {last.weight} kg — beat it</span>) : null}
-                        <a href={demoUrl(e.name)} target="_blank" rel="noreferrer"
-                          className="ml-auto flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold"
-                          style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
-                          <Play size={12} /> Watch demo
-                        </a>
                       </div>
                     </div>
                   </div>
