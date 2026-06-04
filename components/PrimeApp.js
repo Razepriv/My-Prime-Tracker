@@ -1727,7 +1727,7 @@ export default function PrimeApp() {
       )}
 
       {/* first-run walkthrough */}
-      {showTour && <Tour onClose={() => setShowTour(false)} />}
+      {showTour && <Tour profile={profile} onUpdate={updateProfile} onClose={() => setShowTour(false)} />}
 
       {/* community recipes */}
       {showCommunity && <CommunityModal profile={profile} onAdd={(f) => addFood(f, "snack")} onView={(f) => setRecipeFood(f)} onClose={() => setShowCommunity(false)} />}
@@ -2052,10 +2052,11 @@ const TOUR_STEPS = [
   { icon: UtensilsCrossed, title: "Diet & recipes", body: "Get an auto-plan that hits your calorie target, tap any meal for the full recipe, search foods, and track calories & macros live. Indian North/South, veg or non-veg." },
   { icon: TrendingUp, title: "Progress", body: "Your weight trend, BMI, streaks and a completion calendar — plus private progress photos you can upload every couple of weeks." },
   { icon: Sparkles, title: "Your AI Coach", body: "Tap the spark ✨ up top anytime for a weekly check-in, dinner ideas within your macros, or plateau help — it already knows your goal and progress." },
+  { icon: Bell, title: "Stay on track", body: "Turn on reminders so you never miss a day — they work even when the app is closed. Tap Enable notifications, then Enable background push, and pick a time:", notif: true },
   { icon: Smartphone, title: "Install it like an app", body: "Add PRIME to your home screen so it opens full-screen, works offline and feels native:", install: true },
 ];
 
-function Tour({ onClose }) {
+function Tour({ profile, onUpdate, onClose }) {
   const [i, setI] = useState(0);
   const step = TOUR_STEPS[i];
   const last = i === TOUR_STEPS.length - 1;
@@ -2074,6 +2075,7 @@ function Tour({ onClose }) {
         </div>
         <div className="text-center text-2xl font-extrabold text-white">{step.title}</div>
         <div className="text-center text-sm mt-2" style={{ color: "#9a9aa3", lineHeight: 1.6 }}>{step.body}</div>
+        {step.notif && <div className="mt-4 text-left">{profile ? <NotifSettings profile={profile} onUpdate={onUpdate} /> : null}</div>}
         {step.install && <div className="mt-4"><InstallGuide /></div>}
         <div className="mt-6 flex items-center gap-3">
           {i > 0 ? (
