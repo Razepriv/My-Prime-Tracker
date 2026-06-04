@@ -19,6 +19,7 @@ import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum, goalPace } from "@/li
 import { computeAdaptive } from "@/lib/adaptive";
 import {
   buildPlan, composePlan, fillRemaining, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
+  COUNTRIES, COUNTRY_ORDER, cuisineFor, countryHasRegions,
 } from "@/lib/foods";
 
 /* ============================ STORAGE (Supabase) ============================ */
@@ -406,7 +407,7 @@ function Onboarding({ onDone }) {
     equipment: p.equipment,
     workoutDays: (p.workoutDays && p.workoutDays.length) ? p.workoutDays : [1, 3, 5],
     country: p.country,
-    region: p.country === "india" ? p.region : "any",
+    region: countryHasRegions(p.country) ? p.region : "any",
     diet: p.diet,
     startDate: startDate || dateKey(new Date()),
   });
@@ -524,8 +525,15 @@ function Onboarding({ onDone }) {
           )}
           {step === 4 && (
             <>
-              <div><Label>Country</Label><div className="mt-2"><Pills cols={2} options={[["india", "India"], ["other", "Other"]]} value={p.country} onChange={(v) => set("country", v)} /></div></div>
-              {p.country === "india" && (
+              <div>
+                <Label>Country</Label>
+                <select value={p.country} onChange={(e) => set("country", e.target.value)}
+                  className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                  {COUNTRY_ORDER.map((c) => <option key={c} value={c} style={{ background: COL.inp }}>{COUNTRIES[c].label}</option>)}
+                </select>
+                <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>Meals are tailored to your country&apos;s cuisine (India has the deepest menu); universal staples show everywhere.</div>
+              </div>
+              {countryHasRegions(p.country) && (
                 <div><Label>Regional cuisine</Label><div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={p.region} onChange={(v) => set("region", v)} /></div></div>
               )}
               <div><Label>Diet preference</Label><div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={p.diet} onChange={(v) => set("diet", v)} /></div></div>
@@ -1042,12 +1050,13 @@ export default function PrimeApp() {
   const dayNum = sched.beforeStart ? 0 : sched.dss + 1;
   const region = profile.region || "any";
   const diet = profile.diet || "both";
-  const plan = buildPlan(region, diet);
+  const cuisine = cuisineFor(profile.country);
+  const plan = buildPlan(cuisine, region, diet);
   const gp = goalPlan(profile.goal);
 
   const coachContext = [
     `Name: ${profile.name || "(none)"}; sex ${profile.sex}; age ${profile.age}; height ${profile.heightCm}cm.`,
-    `Goal: ${(GOALS[profile.goal] || {}).label}. Diet: ${diet}. Cuisine: ${profile.country === "india" ? region + " Indian" : "other"}.`,
+    `Goal: ${(GOALS[profile.goal] || {}).label}. Diet: ${diet}. Country: ${(COUNTRIES[profile.country] || {}).label || profile.country || "—"}${countryHasRegions(profile.country) ? ` (${region} Indian)` : ""}; cuisine ${cuisine}.`,
     `Current weight ${latestWeight}kg, goal ${profile.goalWeight}kg, BMI ${bmi(latestWeight, profile.heightCm)}.`,
     `Daily targets: ${T.calories} kcal, ${T.protein}g protein, ${T.carbs}g carbs, ${T.fat}g fat${T.adaptive ? " (adaptive/measured)" : " (formula)"}; maintenance≈${T.tdee}.`,
     useAdaptive
@@ -1319,7 +1328,7 @@ export default function PrimeApp() {
           <Label>Cuisine & diet</Label>
           <span className="text-xs" style={{ color: "#6b6b73" }}>changes your plan</span>
         </div>
-        {profile.country === "india" && (
+        {countryHasRegions(profile.country) && (
           <div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={region} onChange={(v) => updateProfile({ region: v })} /></div>
         )}
         <div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={diet} onChange={(v) => updateProfile({ diet: v })} /></div>
@@ -1327,7 +1336,7 @@ export default function PrimeApp() {
 
       {/* auto-composed plan that targets your calories */}
       {(() => {
-        const auto = composePlan(region, diet, T.calories, T.protein);
+        const auto = composePlan(cuisine, region, diet, T.calories, T.protein);
         const pctK = T.calories ? Math.round((auto.totals.kcal / T.calories) * 100) : 0;
         return (
           <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.amberDim}` }}>
@@ -1355,7 +1364,7 @@ export default function PrimeApp() {
         const leftK = Math.round(T.calories - consumed.kcal);
         const leftP = Math.round(T.protein - consumed.protein);
         if (consumed.kcal <= 0 || leftK < 200) return null;
-        const fill = fillRemaining(region, diet, leftK, leftP);
+        const fill = fillRemaining(cuisine, region, diet, leftK, leftP);
         if (!fill.items.length) return null;
         return (
           <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -2348,8 +2357,14 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
               {Object.entries(ACTIVITY).map(([k, a]) => <option key={k} value={k} style={{ background: COL.inp }}>{a.label}</option>)}
             </select>
           </div>
-          <div><Label>Country</Label><div className="mt-2"><Pills cols={2} options={[["india", "India"], ["other", "Other"]]} value={profile.country || "india"} onChange={(v) => onUpdate({ country: v, region: v === "india" ? (profile.region || "north") : "any" })} /></div></div>
-          {profile.country === "india" && (
+          <div>
+            <Label>Country</Label>
+            <select value={profile.country || "india"} onChange={(e) => { const v = e.target.value; onUpdate({ country: v, region: countryHasRegions(v) ? (profile.region && profile.region !== "any" ? profile.region : "north") : "any" }); }}
+              className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+              {COUNTRY_ORDER.map((c) => <option key={c} value={c} style={{ background: COL.inp }}>{COUNTRIES[c].label}</option>)}
+            </select>
+          </div>
+          {countryHasRegions(profile.country) && (
             <div><Label>Regional cuisine</Label><div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={profile.region || "north"} onChange={(v) => onUpdate({ region: v })} /></div></div>
           )}
           <div><Label>Diet preference</Label><div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={profile.diet || "both"} onChange={(v) => onUpdate({ diet: v })} /></div></div>
