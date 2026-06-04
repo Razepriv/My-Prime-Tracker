@@ -78,6 +78,15 @@ async function clearAll() {
 }
 const PHOTO_URL_TTL = 60 * 60 * 24 * 7; // 7 days
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
 // Authorization header carrying the Supabase access token for our API routes.
 async function authHeaders() {
   try {
@@ -1767,9 +1776,29 @@ function CoachSheet({ context, starter, onClose }) {
 /* ============================ NOTIFICATIONS / REMINDERS ============================ */
 function NotifSettings({ profile, onUpdate }) {
   const supported = typeof window !== "undefined" && "Notification" in window;
+  const VAPID = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const [perm, setPerm] = useState(supported ? Notification.permission : "unsupported");
+  const [pushOn, setPushOn] = useState(false);
   const reminders = profile.reminders || { enabled: false, time: "19:00" };
+  const tz = () => -new Date().getTimezoneOffset();
+
+  useEffect(() => { (async () => { try { const reg = await navigator.serviceWorker?.ready; const sub = await reg?.pushManager?.getSubscription(); setPushOn(!!sub); } catch (e) {} })(); }, []);
+
   const enable = async () => { try { setPerm(await Notification.requestPermission()); } catch (e) {} };
+  const enablePush = async () => {
+    try {
+      if (Notification.permission !== "granted") { const p = await Notification.requestPermission(); setPerm(p); if (p !== "granted") return; }
+      if (!VAPID) return;
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID) });
+      const json = sub.toJSON();
+      const existing = (await sGet("prime-push")) || [];
+      await sSet("prime-push", [...existing.filter((s) => s.endpoint !== json.endpoint), json]);
+      onUpdate({ reminders: { ...reminders, enabled: true, time: reminders.time || "19:00", tz: tz() } });
+      setPushOn(true);
+    } catch (e) {}
+  };
+
   return (
     <div>
       <Label>Notifications &amp; reminders</Label>
@@ -1784,16 +1813,24 @@ function NotifSettings({ profile, onUpdate }) {
           )}
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm" style={{ color: "#cfcfd6" }}>Daily reminder</span>
-            <div style={{ width: 130 }}><Pills cols={2} options={[["on", "On"], ["off", "Off"]]} value={reminders.enabled ? "on" : "off"} onChange={(v) => onUpdate({ reminders: { ...reminders, enabled: v === "on" } })} /></div>
+            <div style={{ width: 130 }}><Pills cols={2} options={[["on", "On"], ["off", "Off"]]} value={reminders.enabled ? "on" : "off"} onChange={(v) => onUpdate({ reminders: { ...reminders, enabled: v === "on", time: reminders.time || "19:00", tz: tz() } })} /></div>
           </div>
           {reminders.enabled && (
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm" style={{ color: "#cfcfd6" }}>Reminder time</span>
-              <input type="time" defaultValue={reminders.time || "19:00"} onBlur={(e) => onUpdate({ reminders: { ...reminders, time: e.target.value || "19:00" } })}
+              <input type="time" defaultValue={reminders.time || "19:00"} onBlur={(e) => onUpdate({ reminders: { ...reminders, time: e.target.value || "19:00", tz: tz() } })}
                 className="rounded-lg px-2 py-1.5 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}`, colorScheme: "dark" }} />
             </div>
           )}
-          <div className="text-xs" style={{ color: "#6b6b73" }}>Achievement alerts &amp; reminders fire while the app is open or installed. Background push (when fully closed) needs a server — planned next.</div>
+          {VAPID ? (
+            pushOn ? (
+              <div className="text-xs flex items-center gap-1" style={{ color: "#8be0a4" }}><Check size={13} /> Background reminders on (works when the app is closed)</div>
+            ) : (
+              <button onClick={enablePush} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}><Bell size={16} /> Enable background push reminders</button>
+            )
+          ) : (
+            <div className="text-xs" style={{ color: "#6b6b73" }}>Achievement alerts &amp; reminders fire while the app is open. Background push (when fully closed) activates once the server VAPID keys are set.</div>
+          )}
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@
 // - Precaches the app shell so it opens offline.
 // - Navigations: network-first, fall back to cached /app when offline.
 // - Everything else (Supabase, RapidAPI, etc.) passes straight through.
-const CACHE = "prime-v2";
+const CACHE = "prime-v3";
 const SHELL = ["/app", "/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -17,12 +17,21 @@ self.addEventListener("activate", (e) => {
   self.clients.claim();
 });
 
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) { data = { title: "PRIME", body: e.data ? e.data.text() : "" }; }
+  const title = data.title || "PRIME Tracker";
+  const opts = { body: data.body || "", icon: "/icon-192.png", badge: "/icon-192.png", data: { url: data.url || "/app" } };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/app";
   e.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const c of list) { if (c.url.includes("/app") && "focus" in c) return c.focus(); }
-      if (self.clients.openWindow) return self.clients.openWindow("/app");
+      if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );
 });

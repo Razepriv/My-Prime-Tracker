@@ -8,7 +8,7 @@ export const metadata = {
   description: "Personalised calorie & macro targets, Indian diet plans with recipes, guided workouts with demo videos, and progress photos — your private fitness coach.",
   applicationName: "PRIME Tracker",
   manifest: "/manifest.webmanifest",
-  icons: { icon: "/icon.svg", apple: "/icon.svg" },
+  icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }, { url: "/icon-192.png", type: "image/png", sizes: "192x192" }], apple: "/icon-180.png" },
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "PRIME" },
   openGraph: {
     title: "PRIME Tracker — build your prime physique",
