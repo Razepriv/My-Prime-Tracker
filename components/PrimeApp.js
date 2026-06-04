@@ -345,8 +345,31 @@ function RecoveryScreen({ onDone }) {
 const DEFAULT_PROFILE = {
   name: "", sex: "male", age: "28", heightCm: "175", startWeight: "80", goalWeight: "72",
   goal: "prime", goalMonths: "4", activity: "moderate", experience: "beginner", equipment: "gym",
+  workoutDays: [1, 3, 5],
   country: "india", region: "north", diet: "nonveg",
 };
+
+const DOW_LABELS = [["0", "S"], ["1", "M"], ["2", "T"], ["3", "W"], ["4", "T"], ["5", "F"], ["6", "S"]];
+function WeekdayPicker({ value, onChange }) {
+  const set = new Set(value || []);
+  const toggle = (d) => {
+    const next = new Set(set);
+    next.has(d) ? next.delete(d) : next.add(d);
+    onChange([...next].sort((a, b) => a - b));
+  };
+  return (
+    <div className="grid grid-cols-7 gap-1.5">
+      {DOW_LABELS.map(([k, label]) => {
+        const d = parseInt(k);
+        const on = set.has(d);
+        return (
+          <button key={k} type="button" aria-label={`Toggle day ${label}`} onClick={() => toggle(d)} className="rounded-lg py-2 text-sm font-bold"
+            style={on ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{label}</button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Onboarding({ onDone }) {
   const [step, setStep] = useState(0);
@@ -381,6 +404,7 @@ function Onboarding({ onDone }) {
     activity: p.activity,
     experience: p.experience,
     equipment: p.equipment,
+    workoutDays: (p.workoutDays && p.workoutDays.length) ? p.workoutDays : [1, 3, 5],
     country: p.country,
     region: p.country === "india" ? p.region : "any",
     diet: p.diet,
@@ -484,6 +508,11 @@ function Onboarding({ onDone }) {
                     </button>
                   ))}
                 </div>
+              </div>
+              <div>
+                <Label>Which days will you train?</Label>
+                <div className="mt-2"><WeekdayPicker value={p.workoutDays} onChange={(v) => set("workoutDays", v)} /></div>
+                <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>Recommended: <span style={{ color: COL.amber }}>3 days</span> to start (e.g. Mon/Wed/Fri); 4 once you progress. Rest days are auto-scheduled around them.</div>
               </div>
               <div>
                 <Label>Start date</Label>
@@ -687,7 +716,7 @@ export default function PrimeApp() {
   const [recent, setRecent] = useState([]);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
-  const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience) });
+  const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience), workoutDays: profile?.workoutDays });
   const key = dateKey(selDate);
   const isToday = key === dateKey(new Date());
 
@@ -2265,6 +2294,11 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
           <div>
             <Label>Where you train</Label>
             <div className="mt-2"><Pills options={Object.entries(EQUIPMENT).map(([k, x]) => [k, x.label])} value={profile.equipment || "gym"} onChange={(v) => onUpdate({ equipment: v })} /></div>
+          </div>
+          <div>
+            <Label>Training days</Label>
+            <div className="mt-2"><WeekdayPicker value={profile.workoutDays || [1, 3, 5]} onChange={(v) => onUpdate({ workoutDays: v.length ? v : [1, 3, 5] })} /></div>
+            <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>Workouts land on these days; rest days fill the rest.</div>
           </div>
           <div>
             <Label>Program start date</Label>
