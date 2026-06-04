@@ -47,6 +47,22 @@ Add them in **Vercel → Project → Settings → Environment Variables** (NOT p
 with `NEXT_PUBLIC` — they stay server-side) and redeploy. Optional model override:
 `GROQ_MODEL` (default `llama-3.3-70b-versatile`).
 
+#### Background push reminders + weekly AI check-in (optional)
+
+Real notifications when the app is closed need VAPID keys, a Supabase service
+role key (so the scheduled job can read who to notify), and a cron secret.
+
+1. Generate keys once: `npx web-push generate-vapid-keys`
+2. Add these env vars in Vercel:
+   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PUBLIC_KEY` = the **public** key
+   - `VAPID_PRIVATE_KEY` = the **private** key
+   - `SUPABASE_SERVICE_ROLE_KEY` = Supabase → Settings → API → *service_role* (keep secret)
+   - `CRON_SECRET` = any random string
+3. Redeploy. `vercel.json` already schedules `/api/cron/reminders` hourly and
+   `/api/cron/weekly` weekly. Users enable it under **Settings → Notifications →
+   Enable background push**. Without these vars, reminders still work while the
+   app is open.
+
 ---
 
 ## STEP 1 — Put this code on GitHub
