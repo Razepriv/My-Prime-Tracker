@@ -1,5 +1,6 @@
 import "./globals.css";
 import PWA from "@/components/PWA";
+import { Analytics } from "@vercel/analytics/react";
 
 export const metadata = {
   metadataBase: new URL("https://my-prime-tracker.vercel.app"),
@@ -31,6 +32,7 @@ export default function RootLayout({ children }) {
       <body>
         {children}
         <PWA />
+        <Analytics />
       </body>
     </html>
   );

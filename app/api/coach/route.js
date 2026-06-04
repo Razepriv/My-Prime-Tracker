@@ -5,6 +5,8 @@
 //   GROQ_API_KEY = your Groq API key   (required)
 //   GROQ_MODEL   = model id (optional, defaults to llama-3.3-70b-versatile)
 
+import { verifyUser, rateLimit } from "@/lib/serverAuth";
+
 const KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
@@ -20,6 +22,9 @@ Rules:
 - Encourage consistency over perfection. Keep a warm, direct tone.`;
 
 export async function POST(req) {
+  const user = await verifyUser(req);
+  if (!user) return Response.json({ error: "Please sign in to use the coach." }, { status: 401 });
+  if (!rateLimit("coach:" + user.id, 20, 60000)) return Response.json({ error: "You're sending messages too fast — give it a moment." }, { status: 429 });
   if (!KEY) return Response.json({ error: "Coach isn't configured. Add GROQ_API_KEY in your environment." }, { status: 503 });
   let body;
   try { body = await req.json(); } catch (e) { return Response.json({ error: "Bad request" }, { status: 400 }); }

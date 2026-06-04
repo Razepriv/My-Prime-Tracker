@@ -7,6 +7,8 @@
 //   RAPIDAPI_KEY  = your RapidAPI key  (required)
 //   RAPIDAPI_HOST = host (optional, defaults to the AscendAPI ExerciseDB host)
 
+import { verifyUser, rateLimit } from "@/lib/serverAuth";
+
 const HOST = process.env.RAPIDAPI_HOST || "edb-with-videos-and-images-by-ascendapi.p.rapidapi.com";
 const KEY = process.env.RAPIDAPI_KEY;
 
@@ -22,6 +24,9 @@ function norm(s) {
 }
 
 export async function GET(req) {
+  const user = await verifyUser(req);
+  if (!user) return Response.json({ found: false, reason: "auth required" }, { status: 401 });
+  if (!rateLimit("ex:" + user.id, 90, 60000)) return Response.json({ found: false, reason: "rate limited" }, { status: 429 });
   const { searchParams } = new URL(req.url);
   const name = (searchParams.get("name") || "").trim();
   if (!name) return Response.json({ found: false, reason: "no name" });

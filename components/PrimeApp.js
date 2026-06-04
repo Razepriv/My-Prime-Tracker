@@ -18,7 +18,7 @@ import { WORKOUTS, getSchedule, demoUrl, exSearch, goalPlan, resolveExercise, pr
 import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum, goalPace } from "@/lib/calc";
 import { computeAdaptive } from "@/lib/adaptive";
 import {
-  buildPlan, composePlan, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
+  buildPlan, composePlan, fillRemaining, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
 } from "@/lib/foods";
 
 /* ============================ STORAGE (Supabase) ============================ */
@@ -77,6 +77,15 @@ async function clearAll() {
   try { await supabase.from("user_data").delete().like("key", "prime-%"); } catch (e) {}
 }
 const PHOTO_URL_TTL = 60 * 60 * 24 * 7; // 7 days
+
+// Authorization header carrying the Supabase access token for our API routes.
+async function authHeaders() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const tok = data?.session?.access_token;
+    return tok ? { Authorization: `Bearer ${tok}` } : {};
+  } catch (e) { return {}; }
+}
 
 // Fire a system notification (via the service worker when possible). No-op
 // unless the user has granted permission.
@@ -209,6 +218,17 @@ function AuthScreen() {
     setBusy(false);
   };
 
+  const forgot = async () => {
+    if (!email) { setMsg({ t: "err", m: "Enter your email first, then tap reset." }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const redirectTo = typeof window !== "undefined" ? window.location.origin + "/app" : undefined;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      setMsg(error ? { t: "err", m: error.message } : { t: "ok", m: "Password reset link sent — check your email." });
+    } catch (e) { setMsg({ t: "err", m: "Couldn't send the reset email. Try again." }); }
+    setBusy(false);
+  };
+
   return (
     <div className="min-h-screen flex flex-col justify-center px-6 py-10" style={{ background: COL.bg, fontFamily: FONT }}>
       <div className="mx-auto w-full" style={{ maxWidth: 400 }}>
@@ -250,9 +270,40 @@ function AuthScreen() {
             className="w-full text-center text-sm" style={{ color: "#8a8a93" }}>
             {mode === "signup" ? "Already have an account? Sign in" : "New here? Create an account"}
           </button>
+          {mode === "signin" && (
+            <button onClick={forgot} disabled={busy} className="w-full text-center text-xs" style={{ color: "#6b6b73" }}>Forgot password?</button>
+          )}
         </div>
         <div className="text-center mt-6 text-xs uppercase" style={{ color: "#3a3a40", letterSpacing: "0.15em" }}>
           Discipline today · Strength tomorrow · Prime forever
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ PASSWORD RECOVERY ============================ */
+function RecoveryScreen({ onDone }) {
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const save = async () => {
+    if (pw.length < 6) { setMsg("Use at least 6 characters."); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pw });
+      if (error) setMsg(error.message); else onDone();
+    } catch (e) { setMsg("Couldn't update — try again."); }
+    setBusy(false);
+  };
+  return (
+    <div className="min-h-screen flex flex-col justify-center px-6" style={{ background: COL.bg, fontFamily: FONT }}>
+      <div className="mx-auto w-full" style={{ maxWidth: 400 }}>
+        <div className="text-2xl font-extrabold text-white mb-2">Set a new password</div>
+        <div className="space-y-4 rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+          <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="New password" onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
+          {msg && <div className="text-sm rounded-lg px-3 py-2" style={{ background: "#2a1414", color: "#ff8a8a" }}>{msg}</div>}
+          <button onClick={save} disabled={busy} className="w-full rounded-xl py-3.5 font-bold uppercase" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}>{busy ? "Saving…" : "Save password"}</button>
         </div>
       </div>
     </div>
@@ -441,7 +492,8 @@ function ExerciseMedia({ name, query, fallbackHref }) {
   useEffect(() => {
     let on = true;
     if (EX_MEDIA_CACHE[q] !== undefined) { setM(EX_MEDIA_CACHE[q]); return; }
-    fetch("/api/exercise?name=" + encodeURIComponent(q))
+    authHeaders()
+      .then((h) => fetch("/api/exercise?name=" + encodeURIComponent(q), { headers: h }))
       .then((r) => r.json())
       .then((d) => { EX_MEDIA_CACHE[q] = d; if (on) setM(d); })
       .catch(() => { EX_MEDIA_CACHE[q] = { found: false }; if (on) setM({ found: false }); });
@@ -468,7 +520,7 @@ function ExerciseMedia({ name, query, fallbackHref }) {
 function parseSetCount(s) { if (!/[×x]/i.test(s || "")) return 1; const m = (s || "").match(/(\d+)/); return m ? Math.min(6, Math.max(1, parseInt(m[1]))) : 3; }
 function ensureSets(e, st, extra = 0) {
   if (st && Array.isArray(st.sets) && st.sets.length) return st.sets.map((x) => ({ w: x.w ?? "", reps: x.reps ?? "", done: !!x.done }));
-  const n = parseSetCount(e.sets) + extra;
+  const n = Math.max(1, parseSetCount(e.sets) + extra);
   const seed = st?.weight || "";
   return Array.from({ length: n }, (_, i) => ({ w: i === 0 ? seed : "", reps: "", done: !!st?.done }));
 }
@@ -587,6 +639,7 @@ export default function PrimeApp() {
   const [showTour, setShowTour] = useState(false);
   const [achievements, setAchievements] = useState([]);
   const [achToast, setAchToast] = useState(null);
+  const [recovery, setRecovery] = useState(false);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience) });
@@ -612,7 +665,7 @@ export default function PrimeApp() {
   useEffect(() => {
     if (!isConfigured) { setAuthLoading(false); return; }
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthLoading(false); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((e, s) => { if (e === "PASSWORD_RECOVERY") setRecovery(true); setSession(s); });
     return () => { try { sub.subscription.unsubscribe(); } catch (e) {} };
   }, []);
 
@@ -715,16 +768,18 @@ export default function PrimeApp() {
     });
   };
 
+  const liftKey = (id) => id + ":" + (profile?.equipment || "gym");
   const updateEx = (e, sets) => {
     const allDone = sets.length > 0 && sets.every((s) => s.done);
     const topDone = sets.filter((s) => s.done && parseFloat(s.w)).map((s) => parseFloat(s.w));
     const best = topDone.length ? Math.max(...topDone) : "";
     saveDay({ ...day, ex: { ...day.ex, [e.id]: { sets, done: allDone, weight: best } } });
     if (best) {
+      const lk = liftKey(e.id);
       setLifts((prev) => {
-        const ex = prev[e.id];
+        const ex = prev[lk];
         if (!ex || ex.date <= key || (parseFloat(ex.weight) || 0) < best) {
-          const next = { ...prev, [e.id]: { weight: best, date: key } };
+          const next = { ...prev, [lk]: { weight: best, date: key } };
           sSet("prime-lifts", next);
           return next;
         }
@@ -827,8 +882,10 @@ export default function PrimeApp() {
     if (fresh.length) {
       const next = Array.from(new Set([...achievements, ...unlocked]));
       setAchievements(next); sSet("prime-achievements", next);
-      const m = achMeta(fresh[0]);
-      if (m) { setAchToast(m); notify("🏆 " + m.title, m.desc); setTimeout(() => setAchToast(null), 5000); }
+      fresh.forEach((id) => { const m = achMeta(id); if (m) notify("🏆 " + m.title, m.desc); });
+      if (fresh.length === 1) { const m = achMeta(fresh[0]); setAchToast({ title: m.title, desc: m.desc }); }
+      else setAchToast({ title: `${fresh.length} achievements unlocked!`, desc: fresh.map((id) => achMeta(id)?.title).filter(Boolean).join(", ") });
+      setTimeout(() => setAchToast(null), 6000);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [achStats.streak, achStats.daysDone, achStats.prepDone, achStats.proteinHit, achStats.stepsHit, achStats.towardKg, achStats.goalHit]);
@@ -846,6 +903,7 @@ export default function PrimeApp() {
   /* ---- gates ---- */
   if (!isConfigured) return <ConfigScreen />;
   if (authLoading) return <Spinner />;
+  if (recovery) return <RecoveryScreen onDone={() => setRecovery(false)} />;
   if (!session) return <AuthScreen />;
   if (dataLoading) return <Spinner />;
   if (!profile) {
@@ -963,8 +1021,8 @@ export default function PrimeApp() {
             ))}
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setWater(day.water - 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: COL.inp, color: "#cfcfd6" }}><Minus size={14} /></button>
-            <button onClick={() => setWater(day.water + 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: COL.inp, color: "#cfcfd6" }}><Plus size={14} /></button>
+            <button aria-label="Remove a glass of water" onClick={() => setWater(day.water - 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: COL.inp, color: "#cfcfd6" }}><Minus size={14} /></button>
+            <button aria-label="Add a glass of water" onClick={() => setWater(day.water + 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: COL.inp, color: "#cfcfd6" }}><Plus size={14} /></button>
           </div>
         </div>
 
@@ -1041,6 +1099,11 @@ export default function PrimeApp() {
             Easy on purpose — light loads, full range, perfect technique. This primes your joints, tendons and movement patterns so the main program is safe and effective.
           </div>
         )}
+        {sched.deload && (
+          <div className="text-xs mt-2" style={{ color: "#9a9aa3" }}>
+            <b style={{ color: COL.amber }}>Deload week.</b> One less set per exercise and lighter loads (~10–20%). Planned recovery so you come back stronger — don&apos;t skip it.
+          </div>
+        )}
       </div>
 
       {sched.workoutKey ? (
@@ -1052,8 +1115,8 @@ export default function PrimeApp() {
                 <ExerciseCard
                   key={e.id + "-" + key}
                   e={e}
-                  initial={ensureSets(e, day.ex?.[e.id], sched.prep ? 0 : gp.extraSets)}
-                  last={lifts[e.id]}
+                  initial={ensureSets(e, day.ex?.[e.id], sched.prep ? 0 : (sched.deload ? -1 : gp.extraSets))}
+                  last={lifts[liftKey(e.id)]}
                   onPersist={(sets) => updateEx(e, sets)}
                   restSec={sched.prep ? 60 : gp.restSec}
                 />
@@ -1134,6 +1197,32 @@ export default function PrimeApp() {
                 <button key={f.slot} onClick={() => setRecipeFood(f)} className="w-full text-left flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
                   <span className="text-sm text-white truncate">{MEAL_LABEL[f.slot]}: {f.name}{f.qty > 1 ? ` ×${f.qty}` : ""}</span>
                   <span className="text-xs shrink-0" style={{ color: "#6b6b73" }}>{f.kcal * f.qty} kcal</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* fill what's left of today's target */}
+      {(() => {
+        const leftK = Math.round(T.calories - consumed.kcal);
+        const leftP = Math.round(T.protein - consumed.protein);
+        if (consumed.kcal <= 0 || leftK < 200) return null;
+        const fill = fillRemaining(region, diet, leftK, leftP);
+        if (!fill.items.length) return null;
+        return (
+          <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2"><Plus size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">Fill remaining</span></div>
+              <button onClick={() => logPlanItems(fill.items)} className="rounded-lg px-3 py-1.5 text-xs font-bold flex items-center gap-1" style={{ background: COL.amber, color: "#000" }}><Plus size={12} /> Log these</button>
+            </div>
+            <div className="text-xs mb-2" style={{ color: "#8a8a93" }}>{leftK} kcal &amp; {Math.max(0, leftP)}g protein left — these cover ~{Math.round(fill.totals.kcal)} kcal.</div>
+            <div className="space-y-1.5">
+              {fill.items.map((f, idx) => (
+                <button key={idx} onClick={() => setRecipeFood(f)} className="w-full text-left flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                  <span className="text-sm text-white truncate">{f.name}</span>
+                  <span className="text-xs shrink-0" style={{ color: "#6b6b73" }}>{f.kcal} kcal · {f.protein}g P</span>
                 </button>
               ))}
             </div>
@@ -1390,12 +1479,12 @@ export default function PrimeApp() {
             </div>
           </div>
           <div className="mt-3 flex items-center justify-between">
-            <button onClick={() => setSelDate(addDays(selDate, -1))} className="p-2 rounded-lg" style={{ background: COL.card }}><ChevronLeft size={18} color="#cfcfd6" /></button>
-            <button onClick={() => setSelDate(new Date())} className="text-center">
+            <button aria-label="Previous day" onClick={() => setSelDate(addDays(selDate, -1))} className="p-2 rounded-lg" style={{ background: COL.card }}><ChevronLeft size={18} color="#cfcfd6" /></button>
+            <button aria-label="Jump to today" onClick={() => setSelDate(new Date())} className="text-center">
               <div className="text-sm font-bold text-white">{isToday ? "Today" : prettyDate(selDate)}</div>
               <div className="text-xs" style={{ color: "#6b6b73" }}>{isToday ? prettyDate(selDate) : "tap for today"}</div>
             </button>
-            <button onClick={() => setSelDate(addDays(selDate, 1))} className="p-2 rounded-lg" style={{ background: COL.card }}><ChevronRight size={18} color="#cfcfd6" /></button>
+            <button aria-label="Next day" onClick={() => setSelDate(addDays(selDate, 1))} className="p-2 rounded-lg" style={{ background: COL.card }}><ChevronRight size={18} color="#cfcfd6" /></button>
           </div>
         </div>
 
@@ -1509,7 +1598,7 @@ export default function PrimeApp() {
                 if (meta.length) await supabase.storage.from("progress").remove(meta.map((m) => m.path));
               } catch (e) {}
               await clearAll();
-              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setHistory([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
+              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setHistory([]); setAchievements([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
             }
           }}
         />
@@ -1618,7 +1707,7 @@ function CoachSheet({ context, starter, onClose }) {
     setMessages(next); setInput(""); setBusy(true);
     try {
       const r = await fetch("/api/coach", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) },
         body: JSON.stringify({ context, messages: next }),
       });
       const j = await r.json();
