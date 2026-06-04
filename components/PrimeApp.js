@@ -7,9 +7,10 @@ import {
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
   Play, Upload, Trash2, User, Activity, Leaf, Beef, Timer, RotateCcw,
-  Sparkles, Send, Smartphone,
+  Sparkles, Send, Smartphone, Bell, Trophy,
 } from "lucide-react";
 import InstallGuide from "@/components/InstallGuide";
+import { ACHIEVEMENTS, evaluate as evalAchievements, meta as achMeta } from "@/lib/achievements";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
@@ -76,6 +77,19 @@ async function clearAll() {
   try { await supabase.from("user_data").delete().like("key", "prime-%"); } catch (e) {}
 }
 const PHOTO_URL_TTL = 60 * 60 * 24 * 7; // 7 days
+
+// Fire a system notification (via the service worker when possible). No-op
+// unless the user has granted permission.
+function notify(title, body) {
+  try {
+    if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then((r) => r.showNotification(title, { body, icon: "/icon.svg", badge: "/icon.svg" })).catch(() => {});
+    } else {
+      new Notification(title, { body, icon: "/icon.svg" });
+    }
+  } catch (e) {}
+}
 
 /* ============================ DATE HELPERS ============================ */
 function dateKey(d) {
@@ -571,6 +585,8 @@ export default function PrimeApp() {
   const [dietQuery, setDietQuery] = useState("");
   const [coach, setCoach] = useState(null); // null | { starter }
   const [showTour, setShowTour] = useState(false);
+  const [achievements, setAchievements] = useState([]);
+  const [achToast, setAchToast] = useState(null);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience) });
@@ -606,13 +622,14 @@ export default function PrimeApp() {
     if (!session) { setProfile(null); setDataLoading(false); return; }
     setDataLoading(true);
     (async () => {
-      const core = await sGetMany(["prime-profile", "prime-weights", "prime-lifts", "prime-complete"]);
+      const core = await sGetMany(["prime-profile", "prime-weights", "prime-lifts", "prime-complete", "prime-achievements"]);
       const p = core["prime-profile"];
       if (p) {
         setProfile(p);
         setWeights(core["prime-weights"] || []);
         setLifts(core["prime-lifts"] || {});
         setComplete(core["prime-complete"] || []);
+        setAchievements(core["prime-achievements"] || []);
         loadPhotos();
         loadHistory();
       } else {
@@ -793,6 +810,38 @@ export default function PrimeApp() {
     const sl = parseFloat(day.sleep); max += 1; if (!isNaN(sl) && sl >= 7) pts += 1;
     return Math.round((pts / max) * 100);
   })();
+
+  /* ---- achievements + reminders ---- */
+  const towardKg = profile ? (profile.goalWeight <= profile.startWeight ? profile.startWeight - latestWeight : latestWeight - profile.startWeight) : 0;
+  const goalHit = profile ? (profile.goalWeight <= profile.startWeight ? latestWeight <= profile.goalWeight : latestWeight >= profile.goalWeight) : false;
+  const achStats = {
+    streak, daysDone: complete.length,
+    prepDone: !!(profile && prepWeeksFor(profile.experience) > 0 && !sched.prep && !sched.beforeStart && sched.week >= 1),
+    proteinHit: T.protein ? consumed.protein >= T.protein : false,
+    stepsHit: day.steps >= STEPG, towardKg, goalHit,
+  };
+  useEffect(() => {
+    if (!profile) return;
+    const unlocked = evalAchievements(achStats);
+    const fresh = unlocked.filter((id) => !achievements.includes(id));
+    if (fresh.length) {
+      const next = Array.from(new Set([...achievements, ...unlocked]));
+      setAchievements(next); sSet("prime-achievements", next);
+      const m = achMeta(fresh[0]);
+      if (m) { setAchToast(m); notify("🏆 " + m.title, m.desc); setTimeout(() => setAchToast(null), 5000); }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [achStats.streak, achStats.daysDone, achStats.prepDone, achStats.proteinHit, achStats.stepsHit, achStats.towardKg, achStats.goalHit]);
+
+  useEffect(() => {
+    if (!profile?.reminders?.enabled) return;
+    if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+    const parts = (profile.reminders.time || "19:00").split(":").map((n) => parseInt(n));
+    const now = new Date(); const target = new Date(); target.setHours(parts[0] || 19, parts[1] || 0, 0, 0);
+    if (target <= now) return;
+    const t = setTimeout(() => notify("PRIME reminder", "Time to train and log your day 💪"), target - now);
+    return () => clearTimeout(t);
+  }, [profile?.reminders?.enabled, profile && profile.reminders && profile.reminders.time]);
 
   /* ---- gates ---- */
   if (!isConfigured) return <ConfigScreen />;
@@ -1273,6 +1322,27 @@ export default function PrimeApp() {
 
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
         <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2"><Trophy size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">Achievements</span></div>
+          <span className="text-xs" style={{ color: "#6b6b73" }}>{achievements.length}/{ACHIEVEMENTS.length}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {ACHIEVEMENTS.map((a) => {
+            const got = achievements.includes(a.id);
+            return (
+              <div key={a.id} className="rounded-xl p-3 flex items-center gap-2" style={{ background: got ? "rgba(245,179,1,.10)" : COL.inp, border: `1px solid ${got ? COL.amberDim : COL.line}`, opacity: got ? 1 : 0.6 }}>
+                <Trophy size={16} style={{ color: got ? COL.amber : "#4a4a52", flexShrink: 0 }} />
+                <div className="min-w-0">
+                  <div className="text-xs font-bold truncate" style={{ color: got ? "#fff" : "#8a8a93" }}>{a.title}</div>
+                  <div className="text-xs truncate" style={{ color: "#6b6b73" }}>{a.desc}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+        <div className="flex items-center justify-between mb-3">
           <Label>Last 5 weeks</Label>
           <div className="flex items-center gap-3 text-xs" style={{ color: "#6b6b73" }}>
             <span className="flex items-center gap-1"><span style={{ width: 10, height: 10, borderRadius: 3, background: COL.amber, display: "inline-block" }} /> done</span>
@@ -1413,6 +1483,16 @@ export default function PrimeApp() {
 
       {/* AI coach */}
       {coach && <CoachSheet context={coachContext} starter={coach.starter} onClose={() => setCoach(null)} />}
+
+      {/* achievement toast */}
+      {achToast && (
+        <div className="fixed left-1/2 z-50" style={{ bottom: 90, transform: "translateX(-50%)", maxWidth: 440, width: "92%" }}>
+          <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: COL.card, border: `1px solid ${COL.amber}`, boxShadow: "0 10px 30px rgba(0,0,0,.5)" }}>
+            <Trophy size={22} style={{ color: COL.amber }} />
+            <div><div className="text-white font-bold text-sm">Achievement unlocked</div><div className="text-xs" style={{ color: "#9a9aa3" }}>{achToast.title} — {achToast.desc}</div></div>
+          </div>
+        </div>
+      )}
 
       {/* settings / profile sheet */}
       {showSettings && (
@@ -1595,6 +1675,42 @@ function CoachSheet({ context, starter, onClose }) {
   );
 }
 
+/* ============================ NOTIFICATIONS / REMINDERS ============================ */
+function NotifSettings({ profile, onUpdate }) {
+  const supported = typeof window !== "undefined" && "Notification" in window;
+  const [perm, setPerm] = useState(supported ? Notification.permission : "unsupported");
+  const reminders = profile.reminders || { enabled: false, time: "19:00" };
+  const enable = async () => { try { setPerm(await Notification.requestPermission()); } catch (e) {} };
+  return (
+    <div>
+      <Label>Notifications &amp; reminders</Label>
+      {!supported ? (
+        <div className="text-xs mt-2" style={{ color: "#6b6b73" }}>This browser doesn&apos;t support notifications.</div>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {perm !== "granted" ? (
+            <button onClick={enable} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}><Bell size={16} /> Enable notifications</button>
+          ) : (
+            <div className="text-xs flex items-center gap-1" style={{ color: "#8be0a4" }}><Check size={13} /> Notifications enabled</div>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm" style={{ color: "#cfcfd6" }}>Daily reminder</span>
+            <div style={{ width: 130 }}><Pills cols={2} options={[["on", "On"], ["off", "Off"]]} value={reminders.enabled ? "on" : "off"} onChange={(v) => onUpdate({ reminders: { ...reminders, enabled: v === "on" } })} /></div>
+          </div>
+          {reminders.enabled && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm" style={{ color: "#cfcfd6" }}>Reminder time</span>
+              <input type="time" defaultValue={reminders.time || "19:00"} onBlur={(e) => onUpdate({ reminders: { ...reminders, time: e.target.value || "19:00" } })}
+                className="rounded-lg px-2 py-1.5 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}`, colorScheme: "dark" }} />
+            </div>
+          )}
+          <div className="text-xs" style={{ color: "#6b6b73" }}>Achievement alerts &amp; reminders fire while the app is open or installed. Background push (when fully closed) needs a server — planned next.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================ SETTINGS / PROFILE ============================ */
 function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset, onReplayTour }) {
   const num = (v) => (v === "" || v === null || isNaN(parseFloat(v)) ? "" : parseFloat(v));
@@ -1681,6 +1797,8 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
             <div className="mt-2"><Pills cols={2} options={[["on", "On"], ["off", "Off"]]} value={profile.adaptive === false ? "off" : "on"} onChange={(v) => onUpdate({ adaptive: v === "on" })} /></div>
             <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>When on, your calorie goal is recalculated from your real intake &amp; weight trend once you have ~2 weeks of data.</div>
           </div>
+
+          <NotifSettings profile={profile} onUpdate={onUpdate} />
 
           <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
 

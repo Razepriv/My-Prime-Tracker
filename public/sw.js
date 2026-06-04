@@ -2,7 +2,7 @@
 // - Precaches the app shell so it opens offline.
 // - Navigations: network-first, fall back to cached /app when offline.
 // - Everything else (Supabase, RapidAPI, etc.) passes straight through.
-const CACHE = "prime-v1";
+const CACHE = "prime-v2";
 const SHELL = ["/app", "/", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -15,6 +15,16 @@ self.addEventListener("activate", (e) => {
     caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
   );
   self.clients.claim();
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) { if (c.url.includes("/app") && "focus" in c) return c.focus(); }
+      if (self.clients.openWindow) return self.clients.openWindow("/app");
+    })
+  );
 });
 
 self.addEventListener("fetch", (e) => {

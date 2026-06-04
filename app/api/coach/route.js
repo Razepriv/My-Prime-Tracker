@@ -5,8 +5,8 @@
 //   GROQ_API_KEY = your Groq API key   (required)
 //   GROQ_MODEL   = model id (optional, defaults to llama-3.3-70b-versatile)
 
-const KEY = process.env.GROQ_API_KEY;
-const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const KEY = (process.env.GROQ_API_KEY || "").trim();
+const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 const ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 
 export const runtime = "edge";
@@ -46,7 +46,9 @@ export async function POST(req) {
     });
     if (!r.ok) {
       const t = await r.text().catch(() => "");
-      return Response.json({ error: `Coach upstream error (${r.status}).`, detail: t.slice(0, 300) }, { status: 502 });
+      if (r.status === 401) return Response.json({ error: "Groq rejected the API key (401). In Vercel, set GROQ_API_KEY to a valid key from console.groq.com/keys (it starts with “gsk_”), for the Production environment, then redeploy." }, { status: 401 });
+      if (r.status === 404 || /model/i.test(t)) return Response.json({ error: `Model “${MODEL}” not available. Set GROQ_MODEL to a current Groq model (e.g. llama-3.3-70b-versatile) and redeploy.` }, { status: 502 });
+      return Response.json({ error: `Coach upstream error (${r.status}).`, detail: t.slice(0, 200) }, { status: 502 });
     }
     const j = await r.json();
     const reply = j?.choices?.[0]?.message?.content?.trim() || "Sorry, I couldn't generate a reply just now.";
