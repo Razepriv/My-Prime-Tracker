@@ -261,6 +261,7 @@ function Nav() {
           <a href="#features" style={{ color: COL.dim, fontSize: 14, textDecoration: "none" }}>Features</a>
           <a href="#screens" style={{ color: COL.dim, fontSize: 14, textDecoration: "none" }}>Screens</a>
           <a href="#how" style={{ color: COL.dim, fontSize: 14, textDecoration: "none" }}>How it works</a>
+          <a href="/blog" style={{ color: COL.dim, fontSize: 14, textDecoration: "none" }}>Blog</a>
         </div>
         <a href="/app" style={{ background: COL.amber, color: "#000", fontWeight: 800, fontSize: 14, padding: "9px 18px", borderRadius: 11, textDecoration: "none" }}>Open app</a>
       </div>
@@ -472,6 +473,10 @@ function Footer() {
     <footer style={{ borderTop: `1px solid ${COL.line}`, padding: "26px 20px" }}>
       <div style={{ maxWidth: 1120, margin: "0 auto", display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ color: "#fff", fontWeight: 900, letterSpacing: ".08em", textTransform: "uppercase", fontSize: 14 }}><span style={{ color: COL.amber }}>Prime</span> Tracker</div>
+        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+          <a href="/blog" style={{ color: COL.dim, fontSize: 13, textDecoration: "none" }}>Blog</a>
+          <a href="/app" style={{ color: COL.dim, fontSize: 13, textDecoration: "none" }}>Open app</a>
+        </div>
         <div style={{ color: "#3a3a40", fontSize: 11.5, letterSpacing: ".15em", textTransform: "uppercase" }}>Discipline today · Strength tomorrow · Prime forever</div>
       </div>
     </footer>
