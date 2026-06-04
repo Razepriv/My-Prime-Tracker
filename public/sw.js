@@ -1,9 +1,11 @@
-// Minimal, conservative service worker.
-// - Precaches the app shell so it opens offline.
-// - Navigations: network-first, fall back to cached /app when offline.
-// - Everything else (Supabase, RapidAPI, etc.) passes straight through.
-const CACHE = "prime-v3";
-const SHELL = ["/app", "/", "/manifest.webmanifest", "/icon.svg"];
+// Service worker.
+// - Navigations & dynamic requests: network-first (always fresh when online),
+//   fall back to cache only when offline.
+// - Immutable build assets (/_next/static, icons): cache-first for speed.
+// - Auto-updates: new SW activates immediately; the page reloads via the
+//   `controllerchange` handler in components/PWA.js.
+const CACHE = "prime-v4";
+const SHELL = ["/app", "/", "/manifest.webmanifest", "/icon.svg", "/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
@@ -12,9 +14,12 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())
   );
-  self.clients.claim();
+});
+
+self.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("push", (e) => {
@@ -36,22 +41,32 @@ self.addEventListener("notificationclick", (e) => {
   );
 });
 
+function isImmutable(url) {
+  return url.pathname.startsWith("/_next/static/") ||
+    /\.(?:png|svg|ico|webmanifest|woff2?)$/.test(url.pathname);
+}
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // never touch cross-origin (Supabase/API)
+  if (url.origin !== self.location.origin) return; // never touch cross-origin (Supabase/API/OFF)
+  if (url.pathname.startsWith("/api/")) return;     // never cache our API
 
-  if (req.mode === "navigate") {
+  // Immutable, content-hashed assets → cache-first.
+  if (isImmutable(url)) {
     e.respondWith(
-      fetch(req)
-        .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res; })
-        .catch(() => caches.match(req).then((r) => r || caches.match("/app")))
+      caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+        const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res;
+      }))
     );
     return;
   }
-  // static assets: cache-first, then network
-  e.respondWith(caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-    const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res;
-  }).catch(() => cached)));
+
+  // Everything else (navigations, RSC, data) → network-first, cache fallback.
+  e.respondWith(
+    fetch(req)
+      .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res; })
+      .catch(() => caches.match(req).then((r) => r || caches.match("/app")))
+  );
 });
