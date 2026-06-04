@@ -7,7 +7,7 @@ import {
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
   Play, Upload, Trash2, User, Activity, Leaf, Beef, Timer, RotateCcw,
-  Sparkles, Send, Smartphone, Bell, Trophy, ScanLine, Share2,
+  Sparkles, Send, Smartphone, Bell, Trophy, ScanLine, Share2, Users,
 } from "lucide-react";
 import InstallGuide from "@/components/InstallGuide";
 import { ACHIEVEMENTS, evaluate as evalAchievements, meta as achMeta } from "@/lib/achievements";
@@ -677,6 +677,7 @@ export default function PrimeApp() {
   const [dietQuery, setDietQuery] = useState("");
   const [showScan, setShowScan] = useState(false);
   const [showMeal, setShowMeal] = useState(false);
+  const [showCommunity, setShowCommunity] = useState(false);
   const [analysis, setAnalysis] = useState({ busy: false, text: null });
   const [coach, setCoach] = useState(null); // null | { starter }
   const [showTour, setShowTour] = useState(false);
@@ -1409,6 +1410,11 @@ export default function PrimeApp() {
       ))}
 
       <QuickAdd onAdd={(f) => addFood(f, "snack")} />
+
+      <button onClick={() => setShowCommunity(true)} className="w-full rounded-2xl p-4 flex items-center justify-between" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+        <div className="flex items-center gap-2"><Users size={18} style={{ color: COL.amber }} /><span className="font-bold text-white">Community recipes</span></div>
+        <ChevronRight size={18} style={{ color: "#6b6b73" }} />
+      </button>
     </div>
   );
 
@@ -1694,6 +1700,9 @@ export default function PrimeApp() {
       {/* first-run walkthrough */}
       {showTour && <Tour onClose={() => setShowTour(false)} />}
 
+      {/* community recipes */}
+      {showCommunity && <CommunityModal profile={profile} onAdd={(f) => addFood(f, "snack")} onView={(f) => setRecipeFood(f)} onClose={() => setShowCommunity(false)} />}
+
       {/* AI meal photo */}
       {showMeal && <MealPhotoModal onAdd={(f) => addFood(f, "snack")} onClose={() => setShowMeal(false)} />}
 
@@ -1734,6 +1743,99 @@ export default function PrimeApp() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ============================ COMMUNITY RECIPES ============================ */
+function CommunityModal({ profile, onAdd, onView, onClose }) {
+  const [tab, setTab] = useState("browse");
+  const [items, setItems] = useState(null);
+  const [q, setQ] = useState("");
+  const [form, setForm] = useState({ name: "", kcal: "", protein: "", carbs: "", fat: "", region: profile.region || "any", diet: profile.diet || "veg", steps: "" });
+  const [msg, setMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const { data } = await supabase.from("shared_foods").select("*").order("created_at", { ascending: false }).limit(60);
+      setItems(data || []);
+    } catch (e) { setItems([]); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const publish = async () => {
+    if (!form.name || !parseFloat(form.kcal)) { setMsg("Add at least a name and calories."); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const recipe = form.steps.split("\n").map((s) => s.trim()).filter(Boolean);
+      const { error } = await supabase.from("shared_foods").insert({
+        author: CURRENT_USER, name: form.name.slice(0, 60),
+        kcal: Math.round(parseFloat(form.kcal) || 0), protein: Math.round(parseFloat(form.protein) || 0),
+        carbs: Math.round(parseFloat(form.carbs) || 0), fat: Math.round(parseFloat(form.fat) || 0),
+        region: form.region, diet: form.diet, recipe,
+      });
+      if (error) { setMsg(error.message.includes("does not exist") ? "Run the latest schema.sql to enable Community." : error.message); setBusy(false); return; }
+      setForm({ ...form, name: "", kcal: "", protein: "", carbs: "", fat: "", steps: "" });
+      setTab("browse"); await load();
+    } catch (e) { setMsg("Couldn't publish — try again."); }
+    setBusy(false);
+  };
+
+  const list = (items || []).filter((f) => !q.trim() || f.name.toLowerCase().includes(q.trim().toLowerCase()));
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
+      <div className="w-full rounded-t-3xl flex flex-col" style={{ maxWidth: 480, height: "86vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4" style={{ borderBottom: `1px solid ${COL.line}` }}>
+          <div className="flex items-center gap-2"><Users size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">Community recipes</div></div>
+          <button aria-label="Close" onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
+        </div>
+        <div className="px-4 pt-3 flex gap-2">
+          {[["browse", "Browse"], ["publish", "Publish"]].map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)} className="flex-1 rounded-xl py-2 text-sm font-bold" style={tab === k ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{l}</button>
+          ))}
+        </div>
+
+        {tab === "browse" ? (
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shared recipes…" />
+            {items === null ? (
+              <div className="text-sm" style={{ color: "#8a8a93" }}>Loading…</div>
+            ) : list.length === 0 ? (
+              <div className="text-sm" style={{ color: "#8a8a93" }}>No recipes yet — be the first to publish one!</div>
+            ) : list.map((f) => (
+              <div key={f.id} className="rounded-xl p-3" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <button onClick={() => onView({ ...f, serving: "1 serving", ingredients: [], recipe: f.recipe || [] })} className="text-left flex-1 min-w-0">
+                    <div className="font-semibold text-white truncate">{f.name}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "#8a8a93" }}>{f.kcal} kcal · {f.protein}g P · {f.carbs}g C · {f.fat}g F{f.region && f.region !== "any" ? ` · ${f.region}` : ""}</div>
+                    {f.recipe && f.recipe.length ? <div className="text-xs mt-0.5" style={{ color: COL.amber }}>Tap for recipe →</div> : null}
+                  </button>
+                  <button onClick={() => onAdd(f)} className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold flex items-center gap-1" style={{ background: COL.amber, color: "#000" }}><Plus size={12} /> Log</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Recipe name" />
+            <div className="flex gap-2">
+              <Input value={form.kcal} onChange={(e) => setForm({ ...form, kcal: e.target.value })} inputMode="numeric" placeholder="kcal" />
+              <Input value={form.protein} onChange={(e) => setForm({ ...form, protein: e.target.value })} inputMode="numeric" placeholder="protein" />
+            </div>
+            <div className="flex gap-2">
+              <Input value={form.carbs} onChange={(e) => setForm({ ...form, carbs: e.target.value })} inputMode="numeric" placeholder="carbs" />
+              <Input value={form.fat} onChange={(e) => setForm({ ...form, fat: e.target.value })} inputMode="numeric" placeholder="fat" />
+            </div>
+            <Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"]]} cols={2} value={form.diet} onChange={(v) => setForm({ ...form, diet: v })} />
+            <textarea value={form.steps} onChange={(e) => setForm({ ...form, steps: e.target.value })} rows={5} placeholder="Method — one step per line" className="w-full rounded-xl px-3 py-2.5 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+            {msg && <div className="text-xs" style={{ color: "#ff8a8a" }}>{msg}</div>}
+            <button onClick={publish} disabled={busy} className="w-full rounded-xl py-3 font-bold uppercase" style={{ background: COL.amber, color: "#000", opacity: busy ? 0.6 : 1 }}>{busy ? "Publishing…" : "Publish to community"}</button>
+            <div className="text-xs" style={{ color: "#6b6b73" }}>Shared publicly with other PRIME users. You can only edit/remove your own.</div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

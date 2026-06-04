@@ -62,3 +62,34 @@ create policy "progress delete own" on storage.objects
   for delete using (
     bucket_id = 'progress' and auth.uid()::text = (storage.foldername(name))[1]
   );
+
+-- ============================================================
+--  COMMUNITY — shared recipes (the creator layer)
+--  Anyone signed in can read the catalog; you can only write your own rows.
+-- ============================================================
+
+create table if not exists public.shared_foods (
+  id         uuid        primary key default gen_random_uuid(),
+  author     uuid        not null references auth.users (id) on delete cascade,
+  name       text        not null,
+  kcal       int,
+  protein    int,
+  carbs      int,
+  fat        int,
+  region     text,
+  diet       text,
+  recipe     jsonb,
+  created_at timestamptz default now()
+);
+
+alter table public.shared_foods enable row level security;
+
+drop policy if exists "shared read"       on public.shared_foods;
+drop policy if exists "shared insert own" on public.shared_foods;
+drop policy if exists "shared update own" on public.shared_foods;
+drop policy if exists "shared delete own" on public.shared_foods;
+
+create policy "shared read"       on public.shared_foods for select using (true);
+create policy "shared insert own" on public.shared_foods for insert with check (auth.uid() = author);
+create policy "shared update own" on public.shared_foods for update using (auth.uid() = author) with check (auth.uid() = author);
+create policy "shared delete own" on public.shared_foods for delete using (auth.uid() = author);

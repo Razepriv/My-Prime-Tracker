@@ -31,8 +31,8 @@ Takes about 20–30 minutes the first time.
   plus a weight trend chart, BMI, streaks and a completion calendar.
 
 > The SQL script (`supabase/schema.sql`) also creates a private **`progress`**
-> storage bucket for photos. If you set the project up earlier, just **re-run the
-> script** to add it.
+> storage bucket for photos and a **`shared_foods`** table for Community recipes.
+> If you set the project up earlier, just **re-run the script** to add them.
 
 ### Optional integrations (server-side env vars)
 
