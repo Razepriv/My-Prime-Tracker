@@ -6,7 +6,7 @@ import {
   Home, Dumbbell, UtensilsCrossed, TrendingUp, Check, Plus, Minus,
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
-  Play, Upload, Trash2, User, Activity, Leaf, Beef,
+  Play, Upload, Trash2, User, Activity, Leaf, Beef, Timer, RotateCcw,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
@@ -15,7 +15,7 @@ import { WORKOUTS, getSchedule, demoUrl } from "@/lib/workouts";
 import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum } from "@/lib/calc";
 import { computeAdaptive } from "@/lib/adaptive";
 import {
-  buildPlan, foodById, sumLog, MEAL_ORDER, MEAL_LABEL,
+  buildPlan, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
 } from "@/lib/foods";
 
 /* ============================ STORAGE (Supabase) ============================ */
@@ -393,6 +393,103 @@ function ExerciseMedia({ name, fallbackHref }) {
   );
 }
 
+/* ============================ SET LOGGING ============================ */
+function parseSetCount(s) { const m = (s || "").match(/(\d+)/); return m ? Math.min(6, Math.max(1, parseInt(m[1]))) : 3; }
+function ensureSets(e, st) {
+  if (st && Array.isArray(st.sets) && st.sets.length) return st.sets.map((x) => ({ w: x.w ?? "", reps: x.reps ?? "", done: !!x.done }));
+  const n = parseSetCount(e.sets);
+  const seed = st?.weight || "";
+  return Array.from({ length: n }, (_, i) => ({ w: i === 0 ? seed : "", reps: "", done: !!st?.done }));
+}
+
+function RestTimer() {
+  const [sec, setSec] = useState(0);
+  const [running, setRunning] = useState(false);
+  useEffect(() => {
+    if (!running) return;
+    if (sec <= 0) { setRunning(false); try { navigator.vibrate && navigator.vibrate(220); } catch (e) {} return; }
+    const t = setTimeout(() => setSec((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [running, sec]);
+  const start = (s) => { setSec(s); setRunning(true); };
+  const mm = String(Math.floor(sec / 60)).padStart(1, "0");
+  const ss = String(sec % 60).padStart(2, "0");
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1 text-xs font-semibold" style={{ color: running ? COL.amber : "#6b6b73" }}>
+        <Timer size={13} /> {running || sec > 0 ? `${mm}:${ss}` : "Rest"}
+      </div>
+      {[60, 90, 120].map((s) => (
+        <button key={s} onClick={() => start(s)} className="rounded-lg px-2 py-1 text-xs font-semibold" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{s}s</button>
+      ))}
+      {(running || sec > 0) && (
+        <button onClick={() => { setRunning(false); setSec(0); }} className="rounded-lg px-2 py-1 text-xs" style={{ background: COL.inp, color: "#6b6b73" }}><RotateCcw size={12} /></button>
+      )}
+    </div>
+  );
+}
+
+function ExerciseCard({ e, initial, last, onPersist }) {
+  const [sets, setSets] = useState(initial);
+  const allDone = sets.length > 0 && sets.every((s) => s.done);
+  const doneCount = sets.filter((s) => s.done).length;
+
+  const commit = (next) => { setSets(next); onPersist(next); };
+  const setField = (i, field, val) => setSets((prev) => prev.map((s, idx) => (idx === i ? { ...s, [field]: val } : s)));
+  const blurPersist = () => onPersist(sets);
+  const toggleSet = (i) => commit(sets.map((s, idx) => (idx === i ? { ...s, done: !s.done } : s)));
+  const toggleAll = () => commit(sets.map((s) => ({ ...s, done: !allDone })));
+  const addSet = () => commit([...sets, { w: sets[sets.length - 1]?.w || "", reps: "", done: false }]);
+  const removeSet = () => sets.length > 1 && commit(sets.slice(0, -1));
+
+  return (
+    <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${allDone ? COL.amberDim : COL.line}` }}>
+      <div className="flex items-start gap-3">
+        <button onClick={toggleAll} className="mt-0.5 flex items-center justify-center shrink-0"
+          style={{ width: 26, height: 26, borderRadius: 8, background: allDone ? COL.amber : COL.inp, border: `1px solid ${allDone ? COL.amber : COL.line}` }}>
+          {allDone && <Check size={16} color="#000" strokeWidth={3} />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-semibold text-white leading-tight">{e.name}</div>
+            <span className="text-xs shrink-0" style={{ color: "#6b6b73" }}>{doneCount}/{sets.length} sets</span>
+          </div>
+          <div className="text-xs" style={{ color: COL.amber }}>{e.muscle} · {e.sets}</div>
+          {e.cue && <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>{e.cue}</div>}
+          {last && last.weight ? <div className="text-xs mt-1" style={{ color: COL.amber }}>last best: {last.weight} kg — beat it</div> : null}
+          <ExerciseMedia name={e.name} fallbackHref={demoUrl(e.name)} />
+
+          {/* per-set grid */}
+          <div className="mt-3 space-y-1.5">
+            <div className="grid items-center gap-2 text-xs" style={{ gridTemplateColumns: "22px 1fr 1fr 30px", color: "#6b6b73" }}>
+              <span>#</span><span>Weight (kg)</span><span>Reps</span><span></span>
+            </div>
+            {sets.map((s, i) => (
+              <div key={i} className="grid items-center gap-2" style={{ gridTemplateColumns: "22px 1fr 1fr 30px" }}>
+                <span className="text-xs" style={{ color: "#6b6b73" }}>{i + 1}</span>
+                <input value={s.w} onChange={(ev) => setField(i, "w", ev.target.value)} onBlur={blurPersist} inputMode="decimal" placeholder="kg"
+                  className="rounded-lg px-2 py-1.5 text-sm text-white outline-none w-full" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+                <input value={s.reps} onChange={(ev) => setField(i, "reps", ev.target.value)} onBlur={blurPersist} inputMode="numeric" placeholder="reps"
+                  className="rounded-lg px-2 py-1.5 text-sm text-white outline-none w-full" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+                <button onClick={() => toggleSet(i)} className="flex items-center justify-center"
+                  style={{ width: 28, height: 28, borderRadius: 7, background: s.done ? COL.amber : COL.inp, border: `1px solid ${s.done ? COL.amber : COL.line}` }}>
+                  {s.done && <Check size={14} color="#000" strokeWidth={3} />}
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2 pt-1">
+              <button onClick={addSet} className="rounded-lg px-2 py-1 text-xs font-semibold flex items-center gap-1" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}><Plus size={11} /> Set</button>
+              {sets.length > 1 && <button onClick={removeSet} className="rounded-lg px-2 py-1 text-xs font-semibold flex items-center gap-1" style={{ background: COL.inp, color: "#6b6b73" }}><Minus size={11} /> Set</button>}
+            </div>
+          </div>
+
+          <RestTimer />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================ MAIN APP ============================ */
 export default function PrimeApp() {
   const [session, setSession] = useState(null);
@@ -412,6 +509,7 @@ export default function PrimeApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [recipeFood, setRecipeFood] = useState(null);
   const [syncErr, setSyncErr] = useState(false);
+  const [dietQuery, setDietQuery] = useState("");
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween);
@@ -531,22 +629,22 @@ export default function PrimeApp() {
     });
   };
 
-  const toggleEx = (id) => {
-    const cur = day.ex?.[id] || {};
-    saveDay({ ...day, ex: { ...day.ex, [id]: { ...cur, done: !cur.done } } });
-  };
-  const setExWeight = (id, v) => {
-    const cur = day.ex?.[id] || {};
-    saveDay({ ...day, ex: { ...day.ex, [id]: { ...cur, weight: v } } });
-    setLifts((prev) => {
-      const ex = prev[id];
-      if (!ex || ex.date <= key) {
-        const next = { ...prev, [id]: { weight: v, date: key } };
-        sSet("prime-lifts", next);
-        return next;
-      }
-      return prev;
-    });
+  const updateEx = (e, sets) => {
+    const allDone = sets.length > 0 && sets.every((s) => s.done);
+    const topDone = sets.filter((s) => s.done && parseFloat(s.w)).map((s) => parseFloat(s.w));
+    const best = topDone.length ? Math.max(...topDone) : "";
+    saveDay({ ...day, ex: { ...day.ex, [e.id]: { sets, done: allDone, weight: best } } });
+    if (best) {
+      setLifts((prev) => {
+        const ex = prev[e.id];
+        if (!ex || ex.date <= key || (parseFloat(ex.weight) || 0) < best) {
+          const next = { ...prev, [e.id]: { weight: best, date: key } };
+          sSet("prime-lifts", next);
+          return next;
+        }
+        return prev;
+      });
+    }
   };
 
   /* ---- food log ---- */
@@ -799,32 +897,15 @@ export default function PrimeApp() {
       {sched.workoutKey ? (
         <>
           <div className="space-y-3">
-            {WORKOUTS[sched.workoutKey].ex.map((e) => {
-              const st = day.ex?.[e.id] || {};
-              const last = lifts[e.id];
-              return (
-                <div key={e.id} className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${st.done ? COL.amberDim : COL.line}` }}>
-                  <div className="flex items-start gap-3">
-                    <button onClick={() => toggleEx(e.id)} className="mt-0.5 flex items-center justify-center shrink-0"
-                      style={{ width: 26, height: 26, borderRadius: 8, background: st.done ? COL.amber : COL.inp, border: `1px solid ${st.done ? COL.amber : COL.line}` }}>
-                      {st.done && <Check size={16} color="#000" strokeWidth={3} />}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-white leading-tight">{e.name}</div>
-                      <div className="text-xs" style={{ color: COL.amber }}>{e.muscle} · {e.sets}</div>
-                      {e.cue && <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>{e.cue}</div>}
-                      <ExerciseMedia name={e.name} fallbackHref={demoUrl(e.name)} />
-                      <div className="mt-2 flex items-center gap-2 flex-wrap">
-                        <span className="text-xs" style={{ color: "#6b6b73" }}>Weight</span>
-                        <input value={st.weight || ""} onChange={(ev) => setExWeight(e.id, ev.target.value)} inputMode="decimal" placeholder="kg"
-                          className="w-20 rounded-lg px-2 py-1 text-sm text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
-                        {last && last.weight ? (<span className="text-xs" style={{ color: COL.amber }}>last: {last.weight} kg — beat it</span>) : null}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            {WORKOUTS[sched.workoutKey].ex.map((e) => (
+              <ExerciseCard
+                key={e.id + "-" + key}
+                e={e}
+                initial={ensureSets(e, day.ex?.[e.id])}
+                last={lifts[e.id]}
+                onPersist={(sets) => updateEx(e, sets)}
+              />
+            ))}
           </div>
 
           <div className="rounded-2xl p-4 space-y-2" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -864,6 +945,28 @@ export default function PrimeApp() {
           <div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={region} onChange={(v) => updateProfile({ region: v })} /></div>
         )}
         <div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={diet} onChange={(v) => updateProfile({ diet: v })} /></div>
+      </div>
+
+      {/* search any food */}
+      <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+        <Label>Search foods</Label>
+        <input value={dietQuery} onChange={(e) => setDietQuery(e.target.value)} placeholder="e.g. paneer, banana, biryani…"
+          className="mt-2 w-full rounded-xl px-3 py-2.5 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+        {dietQuery.trim() && (
+          <div className="mt-3 space-y-2">
+            {searchFoods(dietQuery).length === 0 ? (
+              <div className="text-sm" style={{ color: "#8a8a93" }}>No match. Try the custom-food add below.</div>
+            ) : searchFoods(dietQuery).map((f) => (
+              <div key={f.id} className="flex items-center gap-2 rounded-xl p-2.5" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                <button onClick={() => setRecipeFood(f)} className="text-left flex-1 min-w-0">
+                  <div className="text-sm text-white truncate">{f.name}</div>
+                  <div className="text-xs" style={{ color: "#6b6b73" }}>{f.kcal} kcal · {f.protein}g P · tap for recipe</div>
+                </button>
+                <button onClick={() => addFood(f, f.meal)} className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold flex items-center gap-1" style={{ background: COL.amber, color: "#000" }}><Plus size={12} /> Log</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* logged foods */}
