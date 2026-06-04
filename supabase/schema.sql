@@ -1,0 +1,35 @@
+-- ============================================================
+--  PRIME Tracker — database schema
+--  Run this once in Supabase: Dashboard -> SQL Editor -> New query
+--  -> paste this whole file -> Run.
+-- ============================================================
+
+-- One simple table holds everything, keyed per user.
+create table if not exists public.user_data (
+  user_id    uuid        not null references auth.users (id) on delete cascade,
+  key        text        not null,
+  value      jsonb,
+  updated_at timestamptz default now(),
+  primary key (user_id, key)
+);
+
+-- Turn on Row Level Security so each user can ONLY touch their own rows.
+alter table public.user_data enable row level security;
+
+-- Drop old policies if re-running, then recreate.
+drop policy if exists "select own rows" on public.user_data;
+drop policy if exists "insert own rows" on public.user_data;
+drop policy if exists "update own rows" on public.user_data;
+drop policy if exists "delete own rows" on public.user_data;
+
+create policy "select own rows" on public.user_data
+  for select using (auth.uid() = user_id);
+
+create policy "insert own rows" on public.user_data
+  for insert with check (auth.uid() = user_id);
+
+create policy "update own rows" on public.user_data
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "delete own rows" on public.user_data
+  for delete using (auth.uid() = user_id);
