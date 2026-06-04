@@ -714,6 +714,8 @@ export default function PrimeApp() {
   const [achToast, setAchToast] = useState(null);
   const [recovery, setRecovery] = useState(false);
   const [recent, setRecent] = useState([]);
+  const [dayDate, setDayDate] = useState(null);
+  const lastSave = useRef(Promise.resolve());
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
   const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience), workoutDays: profile?.workoutDays });
@@ -774,10 +776,18 @@ export default function PrimeApp() {
     setHistory(days);
   }
 
-  /* ---- load selected day ---- */
+  /* ---- load selected day (race-guarded; tracks which date `day` belongs to) ---- */
   useEffect(() => {
     if (!session || !profile) return;
-    (async () => { const d = await sGet("prime-day-" + key); setDay({ ...blankDay(), ...(d || {}) }); })();
+    let active = true;
+    const k = key;
+    (async () => {
+      const d = await sGet("prime-day-" + k);
+      if (!active) return; // a newer date was selected before this resolved
+      setDay({ ...blankDay(), ...(d || {}) });
+      setDayDate(k);
+    })();
+    return () => { active = false; };
   }, [key, session, profile]);
 
   const latestWeight = weights.length ? weights[weights.length - 1].weight : (profile ? profile.startWeight : 0);
@@ -790,18 +800,27 @@ export default function PrimeApp() {
   const consumed = sumLog(day.food);
   const STEPG = profile ? goalPlan(profile.goal).stepGoal : STEP_GOAL;
 
-  /* ---- completion / scoring ---- */
-  const isDayComplete = useCallback((dayObj) => {
-    if (!dayObj) return false;
-    const prot = sumLog(dayObj.food).protein;
-    const nutritionOk = T.protein ? prot >= T.protein * 0.9 : (dayObj.food && dayObj.food.length > 0);
-    let workoutOk = true;
+  /* ---- completion / scoring ----
+     A day "counts" at 70% of the day-score, so training OR solid nutrition
+     earns credit (strict all-sets-done + 90% protein starved the streak). */
+  const dayScore = useCallback((dayObj) => {
+    if (!dayObj) return 0;
+    const cons = sumLog(dayObj.food);
+    let pts = 0, max = 0;
+    max += 4; pts += Math.min(1, T.protein ? cons.protein / T.protein : 0) * 4;
     if (sched.workoutKey) {
+      max += 2;
       const list = WORKOUTS[sched.workoutKey].ex;
-      workoutOk = list.every((e) => dayObj.ex && dayObj.ex[e.id] && dayObj.ex[e.id].done);
+      const doneCount = list.filter((e) => dayObj.ex?.[e.id]?.done).length;
+      pts += (doneCount / list.length) * 2;
     }
-    return nutritionOk && workoutOk;
-  }, [sched.workoutKey, T.protein]);
+    max += 1; if ((dayObj.steps || 0) >= STEPG) pts += 1;
+    max += 1; if ((dayObj.water || 0) >= WATER_GOAL) pts += 1;
+    const sl = parseFloat(dayObj.sleep); max += 1; if (!isNaN(sl) && sl >= 7) pts += 1;
+    return max > 0 ? pts / max : 0;
+  }, [sched.workoutKey, T.protein, STEPG]);
+
+  const isDayComplete = useCallback((dayObj) => dayScore(dayObj) >= 0.7, [dayScore]);
 
   const syncComplete = useCallback((dayObj) => {
     const done = isDayComplete(dayObj);
@@ -885,7 +904,16 @@ export default function PrimeApp() {
   };
 
   /* ---- profile editing ---- */
-  const updateProfile = (patch) => { const p = { ...profile, ...patch }; setProfile(p); sSet("prime-profile", p); };
+  const updateProfile = (patch) => { const p = { ...profile, ...patch }; setProfile(p); lastSave.current = sSet("prime-profile", p); };
+
+  // Save & apply: flush the focused field, wait for the write, THEN reload —
+  // so the last edit can't be lost to the page unload.
+  const saveAndApply = async () => {
+    try { document.activeElement && document.activeElement.blur && document.activeElement.blur(); } catch (e) {}
+    await new Promise((r) => setTimeout(r, 60)); // let the blur's onUpdate fire
+    try { await lastSave.current; } catch (e) {}
+    try { window.location.reload(); } catch (e) {}
+  };
 
   /* ---- export all my data (no lock-in) ---- */
   const exportData = async () => {
@@ -965,20 +993,7 @@ export default function PrimeApp() {
     return count;
   })();
 
-  const score = (() => {
-    let pts = 0, max = 0;
-    max += 4; pts += Math.min(1, T.protein ? consumed.protein / T.protein : 0) * 4;
-    if (sched.workoutKey) {
-      max += 2;
-      const list = WORKOUTS[sched.workoutKey].ex;
-      const doneCount = list.filter((e) => day.ex?.[e.id]?.done).length;
-      pts += (doneCount / list.length) * 2;
-    }
-    max += 1; if (day.steps >= STEPG) pts += 1;
-    max += 1; if (day.water >= WATER_GOAL) pts += 1;
-    const sl = parseFloat(day.sleep); max += 1; if (!isNaN(sl) && sl >= 7) pts += 1;
-    return Math.round((pts / max) * 100);
-  })();
+  const score = Math.round(dayScore(day) * 100);
 
   /* ---- achievements + reminders ---- */
   const towardKg = profile ? (profile.goalWeight <= profile.startWeight ? profile.startWeight - latestWeight : latestWeight - profile.startWeight) : 0;
@@ -1222,6 +1237,9 @@ export default function PrimeApp() {
 
       {sched.workoutKey ? (
         <>
+          {dayDate !== key ? (
+            <div className="rounded-2xl p-5 text-sm" style={{ background: COL.card, border: `1px solid ${COL.line}`, color: "#8a8a93" }}>Loading your sets…</div>
+          ) : (
           <div className="space-y-3">
             {WORKOUTS[sched.workoutKey].ex.map((base) => {
               const e = resolveExercise(base, profile.equipment);
@@ -1237,6 +1255,7 @@ export default function PrimeApp() {
               );
             })}
           </div>
+          )}
 
           <div className="rounded-2xl p-4 space-y-2" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
             <div className="flex items-center gap-2 text-white font-semibold"><Activity size={16} style={{ color: COL.amber }} />{sched.prep ? "Foundation guidance" : `Conditioning · ${gp.focus}`}</div>
@@ -1765,6 +1784,7 @@ export default function PrimeApp() {
           onClose={() => setShowSettings(false)}
           onReplayTour={() => { setShowSettings(false); setShowTour(true); }}
           onExport={exportData}
+          onSaveApply={saveAndApply}
           onUpdate={updateProfile}
           onSignOut={async () => { setShowSettings(false); await supabase.auth.signOut(); }}
           onReset={async () => {
@@ -2248,7 +2268,7 @@ function NotifSettings({ profile, onUpdate }) {
 }
 
 /* ============================ SETTINGS / PROFILE ============================ */
-function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset, onReplayTour, onExport }) {
+function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset, onReplayTour, onExport, onSaveApply }) {
   const num = (v) => (v === "" || v === null || isNaN(parseFloat(v)) ? "" : parseFloat(v));
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
@@ -2343,7 +2363,7 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
 
           <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
 
-          <button onClick={() => { try { (document.activeElement && document.activeElement.blur && document.activeElement.blur()); } catch (e) {} setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 250); }}
+          <button onClick={onSaveApply}
             className="w-full rounded-xl py-3 text-sm font-bold uppercase" style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>
             Save &amp; apply changes
           </button>

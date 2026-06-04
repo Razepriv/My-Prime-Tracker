@@ -2,8 +2,10 @@ import "./globals.css";
 import PWA from "@/components/PWA";
 import { Analytics } from "@vercel/analytics/react";
 
+const SITE = process.env.NEXT_PUBLIC_SITE_URL || "https://primetracker.apexaios.io";
+
 export const metadata = {
-  metadataBase: new URL("https://my-prime-tracker.vercel.app"),
+  metadataBase: new URL(SITE),
   title: { default: "PRIME Tracker — your 28-week transformation", template: "%s · PRIME Tracker" },
   description: "Personalised calorie & macro targets, Indian diet plans with recipes, guided workouts with demo videos, and progress photos — your private fitness coach.",
   applicationName: "PRIME Tracker",
