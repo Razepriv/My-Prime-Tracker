@@ -13,8 +13,8 @@ import InstallGuide from "@/components/InstallGuide";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
-import { WORKOUTS, getSchedule, demoUrl, exSearch, goalPlan } from "@/lib/workouts";
-import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum } from "@/lib/calc";
+import { WORKOUTS, getSchedule, demoUrl, exSearch, goalPlan, resolveExercise, prepWeeksFor, EXPERIENCE, EQUIPMENT } from "@/lib/workouts";
+import { targets, bmi, bmiBand, ACTIVITY, GOALS, clampNum, goalPace } from "@/lib/calc";
 import { computeAdaptive } from "@/lib/adaptive";
 import {
   buildPlan, composePlan, foodById, sumLog, searchFoods, MEAL_ORDER, MEAL_LABEL,
@@ -248,14 +248,17 @@ function AuthScreen() {
 /* ============================ ONBOARDING (multi-step) ============================ */
 const DEFAULT_PROFILE = {
   name: "", sex: "male", age: "28", heightCm: "175", startWeight: "80", goalWeight: "72",
-  goal: "prime", activity: "moderate", country: "india", region: "north", diet: "nonveg",
+  goal: "prime", goalMonths: "4", activity: "moderate", experience: "beginner", equipment: "gym",
+  country: "india", region: "north", diet: "nonveg",
 };
 
 function Onboarding({ onDone }) {
   const [step, setStep] = useState(0);
   const [p, setP] = useState({ ...DEFAULT_PROFILE });
+  const [startDate, setStartDate] = useState(dateKey(new Date()));
   const set = (k, v) => setP((prev) => ({ ...prev, [k]: v }));
-  const steps = ["About you", "Your body", "Your goal", "Your food"];
+  const steps = ["About you", "Your body", "Your goal", "Training", "Your food"];
+  const today = dateKey(new Date());
   const t = targets(
     { ...p, sex: p.sex, age: p.age, heightCm: p.heightCm, activity: p.activity, goal: p.goal },
     p.startWeight
@@ -269,11 +272,14 @@ function Onboarding({ onDone }) {
     startWeight: parseFloat(p.startWeight) || 80,
     goalWeight: parseFloat(p.goalWeight) || 72,
     goal: p.goal,
+    goalMonths: parseFloat(p.goalMonths) || 4,
     activity: p.activity,
+    experience: p.experience,
+    equipment: p.equipment,
     country: p.country,
     region: p.country === "india" ? p.region : "any",
     diet: p.diet,
-    startDate: dateKey(new Date()),
+    startDate: startDate || dateKey(new Date()),
   });
 
   return (
@@ -328,13 +334,61 @@ function Onboarding({ onDone }) {
                   {Object.entries(ACTIVITY).map(([k, a]) => <option key={k} value={k} style={{ background: COL.inp }}>{a.label}</option>)}
                 </select>
               </div>
+              <div>
+                <Label>Reach my goal weight in… (months)</Label>
+                <input value={p.goalMonths} onChange={(e) => set("goalMonths", e.target.value)} inputMode="decimal"
+                  className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+                {(() => {
+                  const pace = goalPace({ goalWeight: p.goalWeight, goalMonths: p.goalMonths, startWeight: p.startWeight }, p.startWeight);
+                  if (!pace) return <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>We&apos;ll personalise your calories to hit this.</div>;
+                  return (
+                    <div className="text-xs mt-1" style={{ color: pace.clamped ? "#f5b301" : "#6b6b73" }}>
+                      ≈ {Math.abs(pace.cappedPerWeek).toFixed(2)} kg/week.
+                      {pace.clamped ? ` That pace is aggressive — for safety we'll aim for ~${pace.realisticMonths} months instead.` : " A safe, sustainable pace."}
+                    </div>
+                  );
+                })()}
+              </div>
               <div className="rounded-xl p-3" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
                 <div className="text-xs" style={{ color: "#6b6b73" }}>Your daily target (auto-calculated)</div>
-                <div className="text-white font-bold text-lg">{t.calories} kcal · {t.protein}g protein</div>
+                <div className="text-white font-bold text-lg">{targets({ ...p, goalMonths: p.goalMonths }, p.startWeight).calories} kcal · {targets({ ...p }, p.startWeight).protein}g protein</div>
               </div>
             </>
           )}
           {step === 3 && (
+            <>
+              <div>
+                <Label>Your experience</Label>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(EXPERIENCE).map(([k, x]) => (
+                    <button key={k} type="button" onClick={() => set("experience", k)} className="w-full text-left rounded-xl px-4 py-3"
+                      style={p.experience === k ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+                      <div className="font-bold">{x.label}</div>
+                      <div className="text-xs mt-0.5" style={{ color: p.experience === k ? "#5a4500" : "#8a8a93" }}>{x.note}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label>Where will you train?</Label>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(EQUIPMENT).map(([k, x]) => (
+                    <button key={k} type="button" onClick={() => set("equipment", k)} className="w-full text-left rounded-xl px-4 py-2.5"
+                      style={p.equipment === k ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+                      <span className="font-bold">{x.label}</span> <span className="text-xs">· {x.note}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label>Start date</Label>
+                <input type="date" value={startDate} min={today} onChange={(e) => setStartDate(e.target.value)}
+                  className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}`, colorScheme: "dark" }} />
+                <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>Today is fine — or pick a future day if you want to start later. Day 1 begins then.</div>
+              </div>
+            </>
+          )}
+          {step === 4 && (
             <>
               <div><Label>Country</Label><div className="mt-2"><Pills cols={2} options={[["india", "India"], ["other", "Other"]]} value={p.country} onChange={(v) => set("country", v)} /></div></div>
               {p.country === "india" && (
@@ -397,7 +451,7 @@ function ExerciseMedia({ name, query, fallbackHref }) {
 }
 
 /* ============================ SET LOGGING ============================ */
-function parseSetCount(s) { const m = (s || "").match(/(\d+)/); return m ? Math.min(6, Math.max(1, parseInt(m[1]))) : 3; }
+function parseSetCount(s) { if (!/[×x]/i.test(s || "")) return 1; const m = (s || "").match(/(\d+)/); return m ? Math.min(6, Math.max(1, parseInt(m[1]))) : 3; }
 function ensureSets(e, st, extra = 0) {
   if (st && Array.isArray(st.sets) && st.sets.length) return st.sets.map((x) => ({ w: x.w ?? "", reps: x.reps ?? "", done: !!x.done }));
   const n = parseSetCount(e.sets) + extra;
@@ -462,7 +516,7 @@ function ExerciseCard({ e, initial, last, onPersist, restSec = 90 }) {
           <div className="text-xs" style={{ color: COL.amber }}>{e.muscle} · {e.sets}</div>
           {e.cue && <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>{e.cue}</div>}
           {last && last.weight ? <div className="text-xs mt-1" style={{ color: COL.amber }}>last best: {last.weight} kg — beat it</div> : null}
-          <ExerciseMedia name={e.name} query={exSearch(e.id, e.name)} fallbackHref={demoUrl(e.name)} />
+          <ExerciseMedia name={e.name} query={e.search || exSearch(e.id, e.name)} fallbackHref={demoUrl(e.name)} />
 
           {/* per-set grid */}
           <div className="mt-3 space-y-1.5">
@@ -519,7 +573,7 @@ export default function PrimeApp() {
   const [showTour, setShowTour] = useState(false);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
-  const sched = getSchedule(startDate, selDate, daysBetween);
+  const sched = getSchedule(startDate, selDate, daysBetween, { prepWeeks: prepWeeksFor(profile?.experience) });
   const key = dateKey(selDate);
   const isToday = key === dateKey(new Date());
 
@@ -809,7 +863,7 @@ export default function PrimeApp() {
           <div className="text-xs" style={{ color: "#6b6b73" }}>day</div>
         </Ring>
         <div className="flex-1">
-          <Label>{sched.beforeStart ? "Starts soon" : `Day ${dayNum} · Week ${sched.week}/${TOTAL_WEEKS}`}</Label>
+          <Label>{sched.beforeStart ? "Starts soon" : `Day ${dayNum} · ${sched.weekLabel}`}</Label>
           <div className="mt-1 text-xl font-bold text-white">
             {score >= 100 ? "Locked in." : score >= 60 ? "Strong work." : score > 0 ? "Keep going." : "Let's begin."}
           </div>
@@ -930,30 +984,46 @@ export default function PrimeApp() {
   const WorkoutView = (
     <div className="space-y-4">
       <div className="rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
-        <Label>{`Phase ${sched.phase} · Week ${sched.week}/${TOTAL_WEEKS} · ${gp.focus}`}</Label>
+        <Label>{sched.prep ? sched.weekLabel : `${sched.weekLabel} · ${gp.focus}`}</Label>
         <div className="mt-1 text-2xl font-extrabold text-white">{sched.workoutKey ? WORKOUTS[sched.workoutKey].label : "Rest Day"}</div>
         <div className="text-sm" style={{ color: COL.amber }}>{sched.workoutKey ? WORKOUTS[sched.workoutKey].tag : "Recovery"}</div>
+        {sched.prep && (
+          <div className="text-xs mt-2" style={{ color: "#9a9aa3" }}>
+            Easy on purpose — light loads, full range, perfect technique. This primes your joints, tendons and movement patterns so the main program is safe and effective.
+          </div>
+        )}
       </div>
 
       {sched.workoutKey ? (
         <>
           <div className="space-y-3">
-            {WORKOUTS[sched.workoutKey].ex.map((e) => (
-              <ExerciseCard
-                key={e.id + "-" + key}
-                e={e}
-                initial={ensureSets(e, day.ex?.[e.id], gp.extraSets)}
-                last={lifts[e.id]}
-                onPersist={(sets) => updateEx(e, sets)}
-                restSec={gp.restSec}
-              />
-            ))}
+            {WORKOUTS[sched.workoutKey].ex.map((base) => {
+              const e = resolveExercise(base, profile.equipment);
+              return (
+                <ExerciseCard
+                  key={e.id + "-" + key}
+                  e={e}
+                  initial={ensureSets(e, day.ex?.[e.id], sched.prep ? 0 : gp.extraSets)}
+                  last={lifts[e.id]}
+                  onPersist={(sets) => updateEx(e, sets)}
+                  restSec={sched.prep ? 60 : gp.restSec}
+                />
+              );
+            })}
           </div>
 
           <div className="rounded-2xl p-4 space-y-2" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
-            <div className="flex items-center gap-2 text-white font-semibold"><Activity size={16} style={{ color: COL.amber }} />Conditioning · {gp.focus}</div>
+            <div className="flex items-center gap-2 text-white font-semibold"><Activity size={16} style={{ color: COL.amber }} />{sched.prep ? "Foundation guidance" : `Conditioning · ${gp.focus}`}</div>
             <ul className="text-sm space-y-1" style={{ color: "#8a8a93" }}>
-              {gp.conditioning.map((c, i) => <li key={i}>• {c}</li>)}
+              {sched.prep ? (
+                <>
+                  <li>• Keep effort at ~5–6/10 (RPE) — you should finish each set feeling you had several reps left.</li>
+                  <li>• Add 10–20 min easy Zone-2 cardio (walk/cycle) after the session.</li>
+                  <li>• Some soreness is normal; sharp pain is not. Prioritise sleep, protein and water.</li>
+                </>
+              ) : (
+                gp.conditioning.map((c, i) => <li key={i}>• {c}</li>)
+              )}
               <li>• Step target today: <span style={{ color: COL.amber }}>{STEPG.toLocaleString()}</span></li>
             </ul>
           </div>
@@ -1572,6 +1642,29 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
             </div>
           </div>
           <div>
+            <Label>Reach goal weight in (months)</Label>
+            <input defaultValue={profile.goalMonths ?? 4} onBlur={(e) => onUpdate({ goalMonths: clampNum(e.target.value, 1, 60, profile.goalMonths) })} inputMode="decimal"
+              className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
+            {(() => {
+              const pace = goalPace(profile, profile.startWeight);
+              if (!pace) return null;
+              return <div className="text-xs mt-1" style={{ color: pace.clamped ? "#f5b301" : "#6b6b73" }}>≈ {Math.abs(pace.cappedPerWeek).toFixed(2)} kg/week{pace.clamped ? ` · capped for safety (~${pace.realisticMonths} months)` : ""}. Diet auto-adjusts to this.</div>;
+            })()}
+          </div>
+          <div>
+            <Label>Experience</Label>
+            <div className="mt-2"><Pills options={Object.entries(EXPERIENCE).map(([k, x]) => [k, x.label])} value={profile.experience || "active"} onChange={(v) => onUpdate({ experience: v })} /></div>
+          </div>
+          <div>
+            <Label>Where you train</Label>
+            <div className="mt-2"><Pills options={Object.entries(EQUIPMENT).map(([k, x]) => [k, x.label])} value={profile.equipment || "gym"} onChange={(v) => onUpdate({ equipment: v })} /></div>
+          </div>
+          <div>
+            <Label>Program start date</Label>
+            <input type="date" defaultValue={profile.startDate} onBlur={(e) => e.target.value && onUpdate({ startDate: e.target.value })}
+              className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}`, colorScheme: "dark" }} />
+          </div>
+          <div>
             <Label>Activity level</Label>
             <select value={profile.activity || "moderate"} onChange={(e) => onUpdate({ activity: e.target.value })}
               className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
@@ -1591,6 +1684,10 @@ function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClos
 
           <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
 
+          <button onClick={() => { try { (document.activeElement && document.activeElement.blur && document.activeElement.blur()); } catch (e) {} setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 250); }}
+            className="w-full rounded-xl py-3 text-sm font-bold uppercase" style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>
+            Save &amp; apply changes
+          </button>
           <button onClick={onReplayTour} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
             <Smartphone size={16} /> Replay tutorial &amp; install guide
           </button>
