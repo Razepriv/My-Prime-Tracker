@@ -6,10 +6,16 @@ import {
   Home, Dumbbell, UtensilsCrossed, TrendingUp, Check, Plus, Minus,
   Moon, Droplets, Flame, Scale, Camera, ChevronLeft, ChevronRight,
   Award, Footprints, Target, Settings, X, Info, LogOut, Mail, Lock,
+  Play, Upload, Trash2, User, Activity, Leaf, Beef,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import { WORKOUTS, getSchedule, demoUrl } from "@/lib/workouts";
+import { targets, bmi, bmiBand, ACTIVITY, GOALS } from "@/lib/calc";
+import {
+  buildPlan, foodById, sumLog, MEAL_ORDER, MEAL_LABEL,
+} from "@/lib/foods";
 
 /* ============================ STORAGE (Supabase) ============================ */
 let CURRENT_USER = null;
@@ -50,125 +56,11 @@ function daysBetween(start, d) {
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function prettyDate(d) { return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }); }
 const TOTAL_WEEKS = 28;
-
-/* ============================ PROGRAM DATA ============================ */
-const WORKOUTS = {
-  fullbody: {
-    label: "Full Body", tag: "Foundation",
-    ex: [
-      { id: "fb_legpress", name: "Leg Press", sets: "3 × 10–12" },
-      { id: "fb_latpull", name: "Lat Pulldown", sets: "3 × 10–12" },
-      { id: "fb_chestpress", name: "Chest Press (or incline DB press)", sets: "3 × 10–12" },
-      { id: "fb_row", name: "Seated Cable Row", sets: "3 × 10–12" },
-      { id: "fb_shoulder", name: "Dumbbell Shoulder Press", sets: "2 × 10–12" },
-      { id: "fb_plank", name: "Plank", sets: "3 × 30–45 sec" },
-    ],
-  },
-  upperA: {
-    label: "Upper A", tag: "Push / Pull",
-    ex: [
-      { id: "ua_incline", name: "Incline DB Press", sets: "3 × 8–12" },
-      { id: "ua_latpull", name: "Lat Pulldown", sets: "3 × 8–12" },
-      { id: "ua_row", name: "Seated Row", sets: "3 × 8–12" },
-      { id: "ua_shoulder", name: "DB Shoulder Press", sets: "3 × 10–12" },
-      { id: "ua_tri", name: "Triceps Pushdown", sets: "3 × 12–15" },
-      { id: "ua_curl", name: "DB Curl", sets: "3 × 12–15" },
-    ],
-  },
-  upperB: {
-    label: "Upper B", tag: "Push / Pull",
-    ex: [
-      { id: "ub_chest", name: "Chest Press", sets: "3 × 8–12" },
-      { id: "ub_pullup", name: "Assisted Pull-up", sets: "3 × 8–12" },
-      { id: "ub_csrow", name: "Chest-Supported Row", sets: "3 × 8–12" },
-      { id: "ub_lateral", name: "Lateral Raises", sets: "3 × 12–15" },
-      { id: "ub_face", name: "Face Pulls", sets: "3 × 12–15" },
-      { id: "ub_hammer", name: "Hammer Curls", sets: "3 × 12–15" },
-    ],
-  },
-  lowerA: {
-    label: "Lower A", tag: "Legs",
-    ex: [
-      { id: "la_legpress", name: "Leg Press", sets: "3 × 10–12" },
-      { id: "la_rdl", name: "Romanian Deadlift (light, learn hinge)", sets: "3 × 10–12" },
-      { id: "la_curl", name: "Leg Curl", sets: "3 × 10–12" },
-      { id: "la_ext", name: "Leg Extension", sets: "3 × 10–12" },
-      { id: "la_calf", name: "Calf Raise", sets: "3 × 15–20" },
-      { id: "la_knee", name: "Hanging Knee Raise", sets: "3 × 10–12" },
-    ],
-  },
-  lowerB: {
-    label: "Lower B", tag: "Legs",
-    ex: [
-      { id: "lb_goblet", name: "Goblet Squat", sets: "3 × 10–12" },
-      { id: "lb_hip", name: "Hip Thrust", sets: "3 × 10–12" },
-      { id: "lb_back", name: "Back Extension", sets: "3 × 10–12" },
-      { id: "lb_curl", name: "Leg Curl", sets: "3 × 10–12" },
-      { id: "lb_calf", name: "Calf Raise", sets: "3 × 15–20" },
-      { id: "lb_crunch", name: "Cable Crunch", sets: "3 × 12–15" },
-    ],
-  },
-};
-
-const MEALS = [
-  {
-    id: "breakfast", title: "Breakfast", protein: "~30g protein",
-    nonveg: "3 whole eggs + 2 egg whites omelette (1 tsp oil) + 2 idli or 1 plain dosa. Black coffee / tea, no sugar.",
-    veg: "2 moong-dal / besan chilla + 100g paneer bhurji (or a big bowl of thick curd). Black coffee / tea, no sugar.",
-  },
-  {
-    id: "lunch", title: "Lunch · main rice meal", protein: "~45g protein",
-    nonveg: "1 cup rice OR 2–3 ragi / jowar rotis + 150g chicken curry or grilled fish. Plenty of low-oil sabzi + salad + small curd.",
-    veg: "1 cup rice OR 2–3 ragi / jowar rotis + 1.5 cups dal + 75g soya chunks or paneer. Plenty of low-oil sabzi + salad + small curd.",
-  },
-  {
-    id: "snack", title: "Evening Snack", protein: "~25–30g protein",
-    both: "50g dry soya chunks, stir-fried — OR 1 scoop whey in milk — OR boiled eggs + sprouts — OR a roasted chana bowl.",
-  },
-  {
-    id: "dinner", title: "Dinner · light, little/no rice", protein: "~45g protein",
-    nonveg: "150–200g chicken or fish + sautéed veg + 2 phulka (or a small millet portion). Optional 1 glass milk before bed.",
-    veg: "150g paneer or soya + dal + veg + 2 phulka. Optional 1 glass milk before bed.",
-  },
-];
-
 const STEP_GOAL = 9000;
 const WATER_GOAL = 8;
 
-/* ============================ SCHEDULE LOGIC ============================ */
-function getSchedule(startDate, date) {
-  const dss = daysBetween(startDate, date);
-  if (dss < 0) return { dss, week: 0, phase: 0, workoutKey: null, rest: true, beforeStart: true };
-  const week = Math.floor(dss / 7) + 1;
-  const dow = date.getDay();
-  const phase = week <= 4 ? 1 : 2;
-  let workoutKey = null;
-  if (phase === 1) {
-    if (dow === 1 || dow === 3 || dow === 5) workoutKey = "fullbody";
-  } else {
-    if (dow === 1) workoutKey = "upperA";
-    else if (dow === 4) workoutKey = "upperB";
-    else if (dow === 2) workoutKey = "lowerA";
-    else if (dow === 5) workoutKey = "lowerB";
-  }
-  return { dss, week, phase, workoutKey, rest: !workoutKey, beforeStart: false };
-}
-
-function blankDay() { return { steps: 0, water: 0, sleep: "", weight: "", ex: {}, meals: {}, notes: "" }; }
-
-function isDayComplete(day, sched) {
-  if (!day) return false;
-  const mealsOk = MEALS.every((m) => day.meals && day.meals[m.id]);
-  let workoutOk = true;
-  if (sched.workoutKey) {
-    const list = WORKOUTS[sched.workoutKey].ex;
-    workoutOk = list.every((e) => day.ex && day.ex[e.id] && day.ex[e.id].done);
-  }
-  return mealsOk && workoutOk;
-}
-
 /* ============================ THEME + SMALL UI ============================ */
-const COL = { bg: "#0a0a0c", card: "#141417", line: "#26262b", amber: "#f5b301", amberDim: "#7a5c08" };
+const COL = { bg: "#0a0a0c", card: "#141417", line: "#26262b", amber: "#f5b301", amberDim: "#7a5c08", inp: "#1d1d22" };
 const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
 
 function Ring({ pct, size = 86, stroke = 8, children }) {
@@ -188,10 +80,10 @@ function Ring({ pct, size = 86, stroke = 8, children }) {
     </div>
   );
 }
-function Bar({ pct }) {
+function Bar({ pct, color = COL.amber }) {
   return (
     <div className="w-full rounded-full overflow-hidden" style={{ height: 8, background: "#26262b" }}>
-      <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: COL.amber, transition: "width 0.4s ease", borderRadius: 999 }} />
+      <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: color, transition: "width 0.4s ease", borderRadius: 999 }} />
     </div>
   );
 }
@@ -200,6 +92,33 @@ function Label({ children }) {
 }
 function Spinner() {
   return <div className="min-h-screen flex items-center justify-center" style={{ background: COL.bg, color: COL.amber, fontFamily: FONT }}><Flame size={28} /></div>;
+}
+function Input(props) {
+  return <input {...props} className={"w-full rounded-xl px-3 py-3 text-white outline-none " + (props.className || "")}
+    style={{ background: COL.inp, border: `1px solid ${COL.line}`, ...(props.style || {}) }} />;
+}
+function Pills({ options, value, onChange, cols = 3 }) {
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+      {options.map(([k, t]) => (
+        <button key={k} type="button" onClick={() => onChange(k)} className="rounded-xl py-2.5 px-2 text-sm font-semibold"
+          style={value === k ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+          {t}
+        </button>
+      ))}
+    </div>
+  );
+}
+function MacroBar({ name, value, target, color }) {
+  const pct = target ? (value / target) * 100 : 0;
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1" style={{ color: "#9a9aa3" }}>
+        <span>{name}</span><span>{Math.round(value)}{target ? ` / ${target}g` : "g"}</span>
+      </div>
+      <Bar pct={pct} color={color} />
+    </div>
+  );
 }
 
 /* ============================ CONFIG SCREEN ============================ */
@@ -211,7 +130,7 @@ function ConfigScreen() {
         <div className="text-sm" style={{ color: "#9a9aa3" }}>
           This app needs its Supabase keys. Add <span style={{ color: COL.amber }}>NEXT_PUBLIC_SUPABASE_URL</span> and{" "}
           <span style={{ color: COL.amber }}>NEXT_PUBLIC_SUPABASE_ANON_KEY</span> in your Vercel project settings
-          (or a local <span style={{ color: COL.amber }}>.env.local</span> file), then redeploy. See the README for exact steps.
+          (or a local <span style={{ color: COL.amber }}>.env.local</span> file), then redeploy.
         </div>
       </div>
     </div>
@@ -251,11 +170,10 @@ function AuthScreen() {
         <div className="mb-8 text-sm" style={{ color: "#8a8a93" }}>
           {mode === "signup" ? "Create an account to save your progress." : "Sign in to continue your journey."}
         </div>
-
         <div className="space-y-4 rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
           <div>
             <Label>Email</Label>
-            <div className="mt-2 flex items-center gap-2 rounded-xl px-3" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }}>
+            <div className="mt-2 flex items-center gap-2 rounded-xl px-3" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
               <Mail size={16} style={{ color: "#6b6b73" }} />
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@email.com"
                 className="w-full bg-transparent py-3 text-white outline-none" />
@@ -263,33 +181,28 @@ function AuthScreen() {
           </div>
           <div>
             <Label>Password</Label>
-            <div className="mt-2 flex items-center gap-2 rounded-xl px-3" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }}>
+            <div className="mt-2 flex items-center gap-2 rounded-xl px-3" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
               <Lock size={16} style={{ color: "#6b6b73" }} />
               <input value={pw} onChange={(e) => setPw(e.target.value)} type="password" placeholder="at least 6 characters"
                 className="w-full bg-transparent py-3 text-white outline-none"
                 onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
             </div>
           </div>
-
           {msg && (
             <div className="text-sm rounded-lg px-3 py-2"
               style={{ background: msg.t === "err" ? "#2a1414" : "#13261a", color: msg.t === "err" ? "#ff8a8a" : "#8be0a4" }}>
               {msg.m}
             </div>
           )}
-
-          <button onClick={submit} disabled={busy}
-            className="w-full rounded-xl py-3.5 font-bold uppercase"
+          <button onClick={submit} disabled={busy} className="w-full rounded-xl py-3.5 font-bold uppercase"
             style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em", opacity: busy ? 0.6 : 1 }}>
             {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
           </button>
-
           <button onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setMsg(null); }}
             className="w-full text-center text-sm" style={{ color: "#8a8a93" }}>
             {mode === "signup" ? "Already have an account? Sign in" : "New here? Create an account"}
           </button>
         </div>
-
         <div className="text-center mt-6 text-xs uppercase" style={{ color: "#3a3a40", letterSpacing: "0.15em" }}>
           Discipline today · Strength tomorrow · Prime forever
         </div>
@@ -298,12 +211,36 @@ function AuthScreen() {
   );
 }
 
-/* ============================ ONBOARDING ============================ */
+/* ============================ ONBOARDING (multi-step) ============================ */
+const DEFAULT_PROFILE = {
+  name: "", sex: "male", age: "28", heightCm: "175", startWeight: "80", goalWeight: "72",
+  goal: "prime", activity: "moderate", country: "india", region: "north", diet: "nonveg",
+};
+
 function Onboarding({ onDone }) {
-  const [name, setName] = useState("");
-  const [startW, setStartW] = useState("120");
-  const [goalW, setGoalW] = useState("95");
-  const [diet, setDiet] = useState("both");
+  const [step, setStep] = useState(0);
+  const [p, setP] = useState({ ...DEFAULT_PROFILE });
+  const set = (k, v) => setP((prev) => ({ ...prev, [k]: v }));
+  const steps = ["About you", "Your body", "Your goal", "Your food"];
+  const t = targets(
+    { ...p, sex: p.sex, age: p.age, heightCm: p.heightCm, activity: p.activity, goal: p.goal },
+    p.startWeight
+  );
+
+  const finish = () => onDone({
+    name: p.name.trim(),
+    sex: p.sex,
+    age: parseInt(p.age) || 28,
+    heightCm: parseFloat(p.heightCm) || 175,
+    startWeight: parseFloat(p.startWeight) || 80,
+    goalWeight: parseFloat(p.goalWeight) || 72,
+    goal: p.goal,
+    activity: p.activity,
+    country: p.country,
+    region: p.country === "india" ? p.region : "any",
+    diet: p.diet,
+    startDate: dateKey(new Date()),
+  });
 
   return (
     <div className="min-h-screen flex flex-col justify-center px-6 py-10" style={{ background: COL.bg, fontFamily: FONT }}>
@@ -311,53 +248,88 @@ function Onboarding({ onDone }) {
         <div className="mb-1 text-3xl font-extrabold text-white uppercase" style={{ letterSpacing: "0.04em" }}>
           Your <span style={{ color: COL.amber }}>Prime</span>
         </div>
-        <div className="mb-8 text-sm" style={{ color: "#8a8a93" }}>
-          A 28-week build to your prime physique. Let&apos;s set your starting point.
+        <div className="mb-5 text-sm" style={{ color: "#8a8a93" }}>{steps[step]} · step {step + 1} of {steps.length}</div>
+        <div className="flex gap-1.5 mb-5">
+          {steps.map((_, i) => (
+            <div key={i} className="flex-1 rounded-full" style={{ height: 4, background: i <= step ? COL.amber : COL.line }} />
+          ))}
         </div>
 
         <div className="space-y-5 rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
-          <div>
-            <Label>Name (optional)</Label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="You"
-              className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }} />
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <Label>Start weight (kg)</Label>
-              <input value={startW} onChange={(e) => setStartW(e.target.value)} inputMode="decimal"
-                className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }} />
-            </div>
-            <div className="flex-1">
-              <Label>Goal weight (kg)</Label>
-              <input value={goalW} onChange={(e) => setGoalW(e.target.value)} inputMode="decimal"
-                className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }} />
-            </div>
-          </div>
-          <div>
-            <Label>Diet preference</Label>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]].map(([k, t]) => (
-                <button key={k} onClick={() => setDiet(k)} className="rounded-xl py-2.5 text-sm font-semibold"
-                  style={diet === k ? { background: COL.amber, color: "#000" } : { background: "#1d1d22", color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="text-xs" style={{ color: "#6b6b73" }}>Height 181 cm · Today becomes Day 1. The plan auto-advances from here.</div>
-          <button
-            onClick={() => onDone({
-              name: name.trim(), startWeight: parseFloat(startW) || 120, goalWeight: parseFloat(goalW) || 95,
-              diet, startDate: dateKey(new Date()),
-            })}
-            className="w-full rounded-xl py-3.5 font-bold uppercase" style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>
-            Start my journey
-          </button>
+          {step === 0 && (
+            <>
+              <div><Label>Name (optional)</Label><div className="mt-2"><Input value={p.name} onChange={(e) => set("name", e.target.value)} placeholder="You" /></div></div>
+              <div><Label>Sex (for calorie maths)</Label><div className="mt-2"><Pills cols={2} options={[["male", "Male"], ["female", "Female"]]} value={p.sex} onChange={(v) => set("sex", v)} /></div></div>
+              <div><Label>Age</Label><div className="mt-2"><Input value={p.age} onChange={(e) => set("age", e.target.value)} inputMode="numeric" /></div></div>
+            </>
+          )}
+          {step === 1 && (
+            <>
+              <div><Label>Height (cm)</Label><div className="mt-2"><Input value={p.heightCm} onChange={(e) => set("heightCm", e.target.value)} inputMode="decimal" /></div></div>
+              <div className="flex gap-3">
+                <div className="flex-1"><Label>Current weight (kg)</Label><div className="mt-2"><Input value={p.startWeight} onChange={(e) => set("startWeight", e.target.value)} inputMode="decimal" /></div></div>
+                <div className="flex-1"><Label>Goal weight (kg)</Label><div className="mt-2"><Input value={p.goalWeight} onChange={(e) => set("goalWeight", e.target.value)} inputMode="decimal" /></div></div>
+              </div>
+              <div className="text-xs" style={{ color: "#6b6b73" }}>BMI now: {bmi(p.startWeight, p.heightCm) || "—"}</div>
+            </>
+          )}
+          {step === 2 && (
+            <>
+              <div>
+                <Label>Main goal</Label>
+                <div className="mt-2 space-y-2">
+                  {Object.entries(GOALS).map(([k, g]) => (
+                    <button key={k} type="button" onClick={() => set("goal", k)} className="w-full text-left rounded-xl px-4 py-3"
+                      style={p.goal === k ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+                      <div className="font-bold">{g.label}</div>
+                      <div className="text-xs" style={{ color: p.goal === k ? "#5a4500" : "#8a8a93" }}>{g.tag}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <Label>Activity level</Label>
+                <select value={p.activity} onChange={(e) => set("activity", e.target.value)}
+                  className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                  {Object.entries(ACTIVITY).map(([k, a]) => <option key={k} value={k} style={{ background: COL.inp }}>{a.label}</option>)}
+                </select>
+              </div>
+              <div className="rounded-xl p-3" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                <div className="text-xs" style={{ color: "#6b6b73" }}>Your daily target (auto-calculated)</div>
+                <div className="text-white font-bold text-lg">{t.calories} kcal · {t.protein}g protein</div>
+              </div>
+            </>
+          )}
+          {step === 3 && (
+            <>
+              <div><Label>Country</Label><div className="mt-2"><Pills cols={2} options={[["india", "India"], ["other", "Other"]]} value={p.country} onChange={(v) => set("country", v)} /></div></div>
+              {p.country === "india" && (
+                <div><Label>Regional cuisine</Label><div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={p.region} onChange={(v) => set("region", v)} /></div></div>
+              )}
+              <div><Label>Diet preference</Label><div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={p.diet} onChange={(v) => set("diet", v)} /></div></div>
+            </>
+          )}
+        </div>
+
+        <div className="mt-5 flex gap-3">
+          {step > 0 && (
+            <button onClick={() => setStep(step - 1)} className="rounded-xl py-3.5 px-5 font-bold"
+              style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>Back</button>
+          )}
+          {step < steps.length - 1 ? (
+            <button onClick={() => setStep(step + 1)} className="flex-1 rounded-xl py-3.5 font-bold uppercase"
+              style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>Next</button>
+          ) : (
+            <button onClick={finish} className="flex-1 rounded-xl py-3.5 font-bold uppercase"
+              style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>Start my journey</button>
+          )}
         </div>
       </div>
     </div>
   );
 }
+
+function blankDay() { return { steps: 0, water: 0, sleep: "", weight: "", ex: {}, food: [], notes: "" }; }
 
 /* ============================ MAIN APP ============================ */
 export default function PrimeApp() {
@@ -373,11 +345,12 @@ export default function PrimeApp() {
   const [weights, setWeights] = useState([]);
   const [lifts, setLifts] = useState({});
   const [complete, setComplete] = useState([]);
-  const [dietView, setDietView] = useState("nonveg");
+  const [photos, setPhotos] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [recipeFood, setRecipeFood] = useState(null);
 
   const startDate = profile ? new Date(profile.startDate + "T00:00:00") : new Date();
-  const sched = getSchedule(startDate, selDate);
+  const sched = getSchedule(startDate, selDate, daysBetween);
   const key = dateKey(selDate);
   const isToday = key === dateKey(new Date());
 
@@ -400,10 +373,10 @@ export default function PrimeApp() {
       const p = await sGet("prime-profile");
       if (p) {
         setProfile(p);
-        setDietView(p.diet === "veg" ? "veg" : "nonveg");
         setWeights((await sGet("prime-weights")) || []);
         setLifts((await sGet("prime-lifts")) || {});
         setComplete((await sGet("prime-complete")) || []);
+        await loadPhotos();
       } else {
         setProfile(null);
       }
@@ -414,12 +387,28 @@ export default function PrimeApp() {
   /* ---- load selected day ---- */
   useEffect(() => {
     if (!session || !profile) return;
-    (async () => { const d = await sGet("prime-day-" + key); setDay(d || blankDay()); })();
+    (async () => { const d = await sGet("prime-day-" + key); setDay({ ...blankDay(), ...(d || {}) }); })();
   }, [key, session, profile]);
 
-  /* ---- completion sync ---- */
+  const latestWeight = weights.length ? weights[weights.length - 1].weight : (profile ? profile.startWeight : 0);
+  const T = profile ? targets(profile, latestWeight) : { calories: 0, protein: 0, carbs: 0, fat: 0, tdee: 0, bmr: 0 };
+  const consumed = sumLog(day.food);
+
+  /* ---- completion / scoring ---- */
+  const isDayComplete = useCallback((dayObj) => {
+    if (!dayObj) return false;
+    const prot = sumLog(dayObj.food).protein;
+    const nutritionOk = T.protein ? prot >= T.protein * 0.9 : (dayObj.food && dayObj.food.length > 0);
+    let workoutOk = true;
+    if (sched.workoutKey) {
+      const list = WORKOUTS[sched.workoutKey].ex;
+      workoutOk = list.every((e) => dayObj.ex && dayObj.ex[e.id] && dayObj.ex[e.id].done);
+    }
+    return nutritionOk && workoutOk;
+  }, [sched.workoutKey, T.protein]);
+
   const syncComplete = useCallback((dayObj) => {
-    const done = isDayComplete(dayObj, sched);
+    const done = isDayComplete(dayObj);
     setComplete((prev) => {
       const has = prev.includes(key);
       let next = prev;
@@ -428,7 +417,7 @@ export default function PrimeApp() {
       if (next !== prev) sSet("prime-complete", next);
       return next;
     });
-  }, [key, sched]);
+  }, [key, isDayComplete]);
 
   const saveDay = useCallback((next) => {
     setDay(next);
@@ -454,7 +443,6 @@ export default function PrimeApp() {
     });
   };
 
-  const toggleMeal = (id) => saveDay({ ...day, meals: { ...day.meals, [id]: !day.meals?.[id] } });
   const toggleEx = (id) => {
     const cur = day.ex?.[id] || {};
     saveDay({ ...day, ex: { ...day.ex, [id]: { ...cur, done: !cur.done } } });
@@ -473,6 +461,56 @@ export default function PrimeApp() {
     });
   };
 
+  /* ---- food log ---- */
+  const addFood = (f, slot) => {
+    const item = { fid: f.id || null, name: f.name, kcal: f.kcal || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0, qty: 1, slot: slot || f.meal || "snack" };
+    saveDay({ ...day, food: [...(day.food || []), item] });
+  };
+  const removeFood = (idx) => saveDay({ ...day, food: day.food.filter((_, i) => i !== idx) });
+  const setFoodQty = (idx, delta) => {
+    const arr = day.food.map((it, i) => i === idx ? { ...it, qty: Math.max(1, (it.qty || 1) + delta) } : it);
+    saveDay({ ...day, food: arr });
+  };
+
+  /* ---- profile editing ---- */
+  const updateProfile = (patch) => { const p = { ...profile, ...patch }; setProfile(p); sSet("prime-profile", p); };
+
+  /* ---- photos (Supabase Storage) ---- */
+  async function loadPhotos() {
+    const meta = (await sGet("prime-photos")) || [];
+    const withUrls = await Promise.all(meta.map(async (m) => {
+      try {
+        const { data } = await supabase.storage.from("progress").createSignedUrl(m.path, 3600);
+        return { ...m, url: data?.signedUrl || null };
+      } catch (e) { return { ...m, url: null }; }
+    }));
+    setPhotos(withUrls);
+  }
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoErr, setPhotoErr] = useState(null);
+  async function uploadPhoto(file) {
+    if (!file || !CURRENT_USER) return;
+    setPhotoBusy(true); setPhotoErr(null);
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${CURRENT_USER}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from("progress").upload(path, file, { upsert: false, contentType: file.type });
+      if (error) { setPhotoErr("Upload failed. Make sure the 'progress' storage bucket exists (see README)."); setPhotoBusy(false); return; }
+      const meta = (await sGet("prime-photos")) || [];
+      const next = [...meta, { path, date: dateKey(new Date()), week: Math.max(1, sched.week || 1) }];
+      await sSet("prime-photos", next);
+      await loadPhotos();
+    } catch (e) { setPhotoErr("Upload failed. Check your connection and bucket setup."); }
+    setPhotoBusy(false);
+  }
+  async function deletePhoto(p) {
+    try { await supabase.storage.from("progress").remove([p.path]); } catch (e) {}
+    const meta = (await sGet("prime-photos")) || [];
+    const next = meta.filter((m) => m.path !== p.path);
+    await sSet("prime-photos", next);
+    await loadPhotos();
+  }
+
   /* ---- derived ---- */
   const streak = (() => {
     const set = new Set(complete);
@@ -484,7 +522,7 @@ export default function PrimeApp() {
 
   const score = (() => {
     let pts = 0, max = 0;
-    max += 4; pts += MEALS.filter((m) => day.meals?.[m.id]).length;
+    max += 4; pts += Math.min(1, T.protein ? consumed.protein / T.protein : 0) * 4;
     if (sched.workoutKey) {
       max += 2;
       const list = WORKOUTS[sched.workoutKey].ex;
@@ -497,20 +535,42 @@ export default function PrimeApp() {
     return Math.round((pts / max) * 100);
   })();
 
-  const latestWeight = weights.length ? weights[weights.length - 1].weight : (profile ? profile.startWeight : 0);
-
   /* ---- gates ---- */
   if (!isConfigured) return <ConfigScreen />;
   if (authLoading) return <Spinner />;
   if (!session) return <AuthScreen />;
   if (dataLoading) return <Spinner />;
   if (!profile) {
-    return <Onboarding onDone={async (p) => { await sSet("prime-profile", p); setProfile(p); setDietView(p.diet === "veg" ? "veg" : "nonveg"); }} />;
+    return <Onboarding onDone={async (p) => { await sSet("prime-profile", p); setProfile(p); }} />;
   }
 
   const dayNum = sched.beforeStart ? 0 : sched.dss + 1;
+  const region = profile.region || "any";
+  const diet = profile.diet || "both";
+  const plan = buildPlan(region, diet);
 
-  /* ============================ VIEWS ============================ */
+  /* ============================ NUTRITION CARD ============================ */
+  const NutritionCard = (
+    <div className="rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+      <div className="flex items-center gap-5">
+        <Ring pct={T.calories ? (consumed.kcal / T.calories) * 100 : 0}>
+          <div className="text-xl font-extrabold text-white">{Math.round(consumed.kcal)}</div>
+          <div className="text-xs" style={{ color: "#6b6b73" }}>/ {T.calories}</div>
+        </Ring>
+        <div className="flex-1 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Calories today</Label>
+            <span className="text-xs" style={{ color: COL.amber }}>{Math.max(0, T.calories - Math.round(consumed.kcal))} left</span>
+          </div>
+          <MacroBar name="Protein" value={consumed.protein} target={T.protein} color="#8be0a4" />
+          <MacroBar name="Carbs" value={consumed.carbs} target={T.carbs} color="#5aa9e6" />
+          <MacroBar name="Fat" value={consumed.fat} target={T.fat} color="#f5b301" />
+        </div>
+      </div>
+    </div>
+  );
+
+  /* ============================ TODAY ============================ */
   const TodayView = (
     <div className="space-y-4">
       <div className="rounded-2xl p-5 flex items-center gap-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -529,6 +589,8 @@ export default function PrimeApp() {
         </div>
       </div>
 
+      {NutritionCard}
+
       <div className="grid grid-cols-2 gap-3">
         <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
           <div className="flex items-center gap-2 mb-2" style={{ color: "#cfcfd6" }}>
@@ -539,9 +601,9 @@ export default function PrimeApp() {
           <Bar pct={(day.steps / STEP_GOAL) * 100} />
           <div className="mt-3 flex gap-2">
             {[1000, 2000].map((n) => (
-              <button key={n} onClick={() => setSteps(day.steps + n)} className="flex-1 rounded-lg py-1.5 text-xs font-semibold" style={{ background: "#1d1d22", color: "#cfcfd6" }}>+{n}</button>
+              <button key={n} onClick={() => setSteps(day.steps + n)} className="flex-1 rounded-lg py-1.5 text-xs font-semibold" style={{ background: COL.inp, color: "#cfcfd6" }}>+{n}</button>
             ))}
-            <button onClick={() => setSteps(0)} className="rounded-lg px-2 py-1.5 text-xs" style={{ background: "#1d1d22", color: "#6b6b73" }}>0</button>
+            <button onClick={() => setSteps(0)} className="rounded-lg px-2 py-1.5 text-xs" style={{ background: COL.inp, color: "#6b6b73" }}>0</button>
           </div>
         </div>
 
@@ -553,12 +615,12 @@ export default function PrimeApp() {
           <div className="flex flex-wrap gap-1.5 mb-3">
             {Array.from({ length: WATER_GOAL }).map((_, i) => (
               <button key={i} onClick={() => setWater(i + 1 === day.water ? i : i + 1)}
-                style={{ width: 18, height: 24, borderRadius: 4, background: i < day.water ? COL.amber : "#1d1d22", border: `1px solid ${COL.line}` }} />
+                style={{ width: 18, height: 24, borderRadius: 4, background: i < day.water ? COL.amber : COL.inp, border: `1px solid ${COL.line}` }} />
             ))}
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setWater(day.water - 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: "#1d1d22", color: "#cfcfd6" }}><Minus size={14} /></button>
-            <button onClick={() => setWater(day.water + 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: "#1d1d22", color: "#cfcfd6" }}><Plus size={14} /></button>
+            <button onClick={() => setWater(day.water - 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: COL.inp, color: "#cfcfd6" }}><Minus size={14} /></button>
+            <button onClick={() => setWater(day.water + 1)} className="flex-1 rounded-lg py-1.5 flex justify-center" style={{ background: COL.inp, color: "#cfcfd6" }}><Plus size={14} /></button>
           </div>
         </div>
 
@@ -595,23 +657,23 @@ export default function PrimeApp() {
         </div>
         {sched.workoutKey ? (
           <div className="mt-2 text-sm" style={{ color: "#8a8a93" }}>
-            {WORKOUTS[sched.workoutKey].ex.filter((e) => day.ex?.[e.id]?.done).length}/{WORKOUTS[sched.workoutKey].ex.length} exercises done
+            {WORKOUTS[sched.workoutKey].ex.filter((e) => day.ex?.[e.id]?.done).length}/{WORKOUTS[sched.workoutKey].ex.length} exercises done · tap for videos
           </div>
         ) : (
           <div className="mt-2 text-sm" style={{ color: "#8a8a93" }}>Easy walk, mobility, hit your step goal. Recovery is where you grow.</div>
         )}
       </button>
 
-      <button onClick={() => setTab("meals")} className="w-full text-left rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+      <button onClick={() => setTab("diet")} className="w-full text-left rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <UtensilsCrossed size={18} style={{ color: COL.amber }} />
-            <span className="font-bold text-white">Meals</span>
+            <span className="font-bold text-white">Diet & Recipes</span>
           </div>
           <ChevronRight size={18} style={{ color: "#6b6b73" }} />
         </div>
         <div className="mt-2 text-sm" style={{ color: "#8a8a93" }}>
-          {MEALS.filter((m) => day.meals?.[m.id]).length}/{MEALS.length} logged · target ~2,000–2,100 kcal · 150–170g protein
+          {(day.food || []).length} items logged · {Math.round(consumed.kcal)} / {T.calories} kcal · tap to plan meals
         </div>
       </button>
 
@@ -623,6 +685,7 @@ export default function PrimeApp() {
     </div>
   );
 
+  /* ============================ WORKOUT ============================ */
   const WorkoutView = (
     <div className="space-y-4">
       <div className="rounded-2xl p-5" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -641,17 +704,27 @@ export default function PrimeApp() {
                 <div key={e.id} className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${st.done ? COL.amberDim : COL.line}` }}>
                   <div className="flex items-start gap-3">
                     <button onClick={() => toggleEx(e.id)} className="mt-0.5 flex items-center justify-center shrink-0"
-                      style={{ width: 26, height: 26, borderRadius: 8, background: st.done ? COL.amber : "#1d1d22", border: `1px solid ${st.done ? COL.amber : COL.line}` }}>
+                      style={{ width: 26, height: 26, borderRadius: 8, background: st.done ? COL.amber : COL.inp, border: `1px solid ${st.done ? COL.amber : COL.line}` }}>
                       {st.done && <Check size={16} color="#000" strokeWidth={3} />}
                     </button>
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-white leading-tight">{e.name}</div>
-                      <div className="text-sm" style={{ color: "#8a8a93" }}>{e.sets}</div>
+                      <div className="text-xs" style={{ color: COL.amber }}>{e.muscle} · {e.sets}</div>
+                      {e.gif && (
+                        <img src={e.gif} alt={e.name} loading="lazy" onError={(ev) => { ev.currentTarget.style.display = "none"; }}
+                          style={{ width: "100%", maxHeight: 180, objectFit: "contain", borderRadius: 12, marginTop: 8, background: "#000" }} />
+                      )}
+                      {e.cue && <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>{e.cue}</div>}
                       <div className="mt-2 flex items-center gap-2 flex-wrap">
                         <span className="text-xs" style={{ color: "#6b6b73" }}>Weight</span>
                         <input value={st.weight || ""} onChange={(ev) => setExWeight(e.id, ev.target.value)} inputMode="decimal" placeholder="kg"
-                          className="w-20 rounded-lg px-2 py-1 text-sm text-white outline-none" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }} />
+                          className="w-20 rounded-lg px-2 py-1 text-sm text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }} />
                         {last && last.weight ? (<span className="text-xs" style={{ color: COL.amber }}>last: {last.weight} kg — beat it</span>) : null}
+                        <a href={demoUrl(e.name)} target="_blank" rel="noreferrer"
+                          className="ml-auto flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold"
+                          style={{ background: COL.inp, color: COL.amber, border: `1px solid ${COL.line}` }}>
+                          <Play size={12} /> Watch demo
+                        </a>
                       </div>
                     </div>
                   </div>
@@ -664,9 +737,9 @@ export default function PrimeApp() {
             <div className="flex items-center gap-2 text-white font-semibold"><Info size={16} style={{ color: COL.amber }} />Coach notes</div>
             <ul className="text-sm space-y-1" style={{ color: "#8a8a93" }}>
               <li>• Warm up: 5 min easy cardio + 1–2 light sets before your first lift.</li>
-              <li>• Start lighter than you think — leave 1–2 reps in the tank while you learn.</li>
-              <li>• Progressive overload: hit the top of the rep range with good form, then add weight next time.</li>
-              {sched.week >= 9 && <li>• You&apos;re strong enough now — start shifting toward barbell squats and deadlifts. Book a trainer to check form first.</li>}
+              <li>• Tap <span style={{ color: COL.amber }}>Watch demo</span> on any exercise for a form video.</li>
+              <li>• Progressive overload: hit the top of the rep range with good form, then add weight.</li>
+              {sched.week >= 9 && <li>• You&apos;re strong enough now — start shifting toward barbell squats and deadlifts.</li>}
             </ul>
           </div>
         </>
@@ -683,48 +756,78 @@ export default function PrimeApp() {
     </div>
   );
 
-  const MealsView = (
+  /* ============================ DIET ============================ */
+  const DietView = (
     <div className="space-y-4">
+      {NutritionCard}
+
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
-        <Label>Daily target</Label>
-        <div className="mt-1 text-white font-bold">~2,000–2,100 kcal · 150–170g protein</div>
-        <div className="text-sm mt-1" style={{ color: "#8a8a93" }}>Measure your cooking oil. No liquid sugar. Eggs and soya chunks are your budget MVPs.</div>
-        {profile.diet === "both" && (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {[["nonveg", "Non-veg"], ["veg", "Veg"]].map(([k, t]) => (
-              <button key={k} onClick={() => setDietView(k)} className="rounded-xl py-2 text-sm font-semibold"
-                style={dietView === k ? { background: COL.amber, color: "#000" } : { background: "#1d1d22", color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{t}</button>
+        <div className="flex items-center justify-between">
+          <Label>Cuisine & diet</Label>
+          <span className="text-xs" style={{ color: "#6b6b73" }}>changes your plan</span>
+        </div>
+        {profile.country === "india" && (
+          <div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={region} onChange={(v) => updateProfile({ region: v })} /></div>
+        )}
+        <div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={diet} onChange={(v) => updateProfile({ diet: v })} /></div>
+      </div>
+
+      {/* logged foods */}
+      <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+        <Label>Today&apos;s food log</Label>
+        {(day.food || []).length === 0 ? (
+          <div className="text-sm mt-2" style={{ color: "#8a8a93" }}>Nothing logged yet. Tap “+ Log” on a meal below to track calories.</div>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {day.food.map((it, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-white truncate">{it.name}</div>
+                  <div className="text-xs" style={{ color: "#6b6b73" }}>{Math.round(it.kcal * it.qty)} kcal · {Math.round(it.protein * it.qty)}g P</div>
+                </div>
+                <button onClick={() => setFoodQty(i, -1)} className="rounded-md px-2 py-1" style={{ background: COL.inp, color: "#cfcfd6" }}><Minus size={12} /></button>
+                <span className="text-sm text-white w-5 text-center">{it.qty}</span>
+                <button onClick={() => setFoodQty(i, 1)} className="rounded-md px-2 py-1" style={{ background: COL.inp, color: "#cfcfd6" }}><Plus size={12} /></button>
+                <button onClick={() => removeFood(i)} className="rounded-md px-2 py-1" style={{ background: "#2a1414", color: "#ff8a8a" }}><Trash2 size={12} /></button>
+              </div>
             ))}
           </div>
         )}
       </div>
 
-      <div className="space-y-3">
-        {MEALS.map((m) => {
-          const on = !!day.meals?.[m.id];
-          const text = m.both ? m.both : (dietView === "veg" ? m.veg : m.nonveg);
-          return (
-            <div key={m.id} className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${on ? COL.amberDim : COL.line}` }}>
-              <div className="flex items-start gap-3">
-                <button onClick={() => toggleMeal(m.id)} className="mt-0.5 flex items-center justify-center shrink-0"
-                  style={{ width: 26, height: 26, borderRadius: 8, background: on ? COL.amber : "#1d1d22", border: `1px solid ${on ? COL.amber : COL.line}` }}>
-                  {on && <Check size={16} color="#000" strokeWidth={3} />}
-                </button>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <div className="font-bold text-white">{m.title}</div>
-                    <div className="text-xs font-semibold" style={{ color: COL.amber }}>{m.protein}</div>
-                  </div>
-                  <div className="text-sm mt-1" style={{ color: "#9a9aa3" }}>{text}</div>
+      {/* suggested plan by slot */}
+      {MEAL_ORDER.filter((slot) => plan[slot]).map((slot) => (
+        <div key={slot} className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+          <div className="flex items-center gap-2 mb-3">
+            <UtensilsCrossed size={16} style={{ color: COL.amber }} />
+            <span className="font-bold text-white">{MEAL_LABEL[slot]}</span>
+          </div>
+          <div className="space-y-2">
+            {plan[slot].map((f) => (
+              <div key={f.id} className="rounded-xl p-3" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <button onClick={() => setRecipeFood(f)} className="text-left flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {f.diet === "veg" ? <Leaf size={13} style={{ color: "#8be0a4" }} /> : <Beef size={13} style={{ color: "#ff8a8a" }} />}
+                      <span className="font-semibold text-white">{f.name}</span>
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: "#8a8a93" }}>{f.kcal} kcal · {f.protein}g P · {f.carbs}g C · {f.fat}g F</div>
+                    <div className="text-xs mt-0.5" style={{ color: COL.amber }}>Tap for full recipe →</div>
+                  </button>
+                  <button onClick={() => addFood(f, slot)} className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold flex items-center gap-1"
+                    style={{ background: COL.amber, color: "#000" }}><Plus size={12} /> Log</button>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <QuickAdd onAdd={(f) => addFood(f, "snack")} />
     </div>
   );
 
+  /* ============================ PROGRESS ============================ */
   const completeSet = new Set(complete);
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   const firstDate = addDays(today0, -34);
@@ -737,6 +840,8 @@ export default function PrimeApp() {
   const span = Math.max(1, profile.startWeight - profile.goalWeight);
   const goalPct = Math.min(100, Math.max(0, (lost / span) * 100));
   const chartData = weights.map((w) => ({ date: w.date.slice(5), kg: w.weight }));
+  const myBmi = bmi(latestWeight, profile.heightCm);
+  const band = bmiBand(myBmi);
 
   const ProgressView = (
     <div className="space-y-4">
@@ -757,6 +862,7 @@ export default function PrimeApp() {
           <span>{profile.goalWeight} kg goal</span>
         </div>
         <Bar pct={goalPct} />
+        <div className="mt-3 text-xs" style={{ color: "#6b6b73" }}>BMI {myBmi || "—"} · <span style={{ color: band.color }}>{band.label}</span></div>
       </div>
 
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
@@ -768,7 +874,7 @@ export default function PrimeApp() {
                 <CartesianGrid stroke="#26262b" vertical={false} />
                 <XAxis dataKey="date" tick={{ fill: "#6b6b73", fontSize: 11 }} axisLine={{ stroke: "#26262b" }} tickLine={false} />
                 <YAxis tick={{ fill: "#6b6b73", fontSize: 11 }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
-                <Tooltip contentStyle={{ background: "#1d1d22", border: `1px solid ${COL.line}`, borderRadius: 12, color: "#fff" }} />
+                <Tooltip contentStyle={{ background: COL.inp, border: `1px solid ${COL.line}`, borderRadius: 12, color: "#fff" }} />
                 <ReferenceLine y={profile.goalWeight} stroke={COL.amber} strokeDasharray="4 4" />
                 <Line type="monotone" dataKey="kg" stroke={COL.amber} strokeWidth={2.5} dot={{ r: 3, fill: COL.amber }} />
               </LineChart>
@@ -797,6 +903,32 @@ export default function PrimeApp() {
         </div>
       </div>
 
+      {/* progress photos */}
+      <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2"><Camera size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">Progress photos</span></div>
+          <label className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold cursor-pointer" style={{ background: COL.amber, color: "#000" }}>
+            <Upload size={12} /> {photoBusy ? "Uploading…" : "Add"}
+            <input type="file" accept="image/*" className="hidden" disabled={photoBusy}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadPhoto(f); e.target.value = ""; }} />
+          </label>
+        </div>
+        {photoErr && <div className="text-xs mb-2 rounded-lg px-3 py-2" style={{ background: "#2a1414", color: "#ff8a8a" }}>{photoErr}</div>}
+        {photos.length === 0 ? (
+          <div className="text-sm" style={{ color: "#8a8a93" }}>Add a front + side photo every 2 weeks. The scale lies on bad days — photos show the real change.</div>
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {photos.slice().reverse().map((p) => (
+              <div key={p.path} className="relative rounded-xl overflow-hidden" style={{ aspectRatio: "3/4", background: COL.inp }}>
+                {p.url ? <img src={p.url} alt={p.date} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div className="flex items-center justify-center h-full text-xs" style={{ color: "#6b6b73" }}>…</div>}
+                <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 text-xs" style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}>Wk {p.week}</div>
+                <button onClick={() => deletePhoto(p)} className="absolute top-1 right-1 rounded-md p-1" style={{ background: "rgba(0,0,0,0.6)", color: "#ff8a8a" }}><Trash2 size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
         <div className="flex items-center justify-between mb-3">
           <Label>Last 5 weeks</Label>
@@ -815,17 +947,12 @@ export default function PrimeApp() {
             const isT = k === dateKey(today0);
             return (
               <div key={i} className="flex items-center justify-center"
-                style={{ aspectRatio: "1", borderRadius: 8, background: done ? COL.amber : "#1d1d22", border: isT ? `2px solid ${COL.amber}` : `1px solid ${COL.line}`, color: done ? "#000" : "#6b6b73", fontSize: 11, fontWeight: 700 }}>
+                style={{ aspectRatio: "1", borderRadius: 8, background: done ? COL.amber : COL.inp, border: isT ? `2px solid ${COL.amber}` : `1px solid ${COL.line}`, color: done ? "#000" : "#6b6b73", fontSize: 11, fontWeight: 700 }}>
                 {c.getDate()}
               </div>
             );
           })}
         </div>
-      </div>
-
-      <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
-        <Camera size={20} style={{ color: COL.amber }} />
-        <div className="text-sm" style={{ color: "#9a9aa3" }}>Take a front + side progress photo every 2 weeks. The scale lies on bad days — photos show the real change.</div>
       </div>
     </div>
   );
@@ -833,7 +960,7 @@ export default function PrimeApp() {
   const tabs = [
     { id: "today", label: "Today", icon: Home },
     { id: "workout", label: "Workout", icon: Dumbbell },
-    { id: "meals", label: "Meals", icon: UtensilsCrossed },
+    { id: "diet", label: "Diet", icon: UtensilsCrossed },
     { id: "progress", label: "Progress", icon: TrendingUp },
   ];
 
@@ -865,7 +992,7 @@ export default function PrimeApp() {
           )}
           {tab === "today" && TodayView}
           {tab === "workout" && WorkoutView}
-          {tab === "meals" && MealsView}
+          {tab === "diet" && DietView}
           {tab === "progress" && ProgressView}
 
           <div className="text-center mt-8 mb-2 text-xs uppercase" style={{ color: "#3a3a40", letterSpacing: "0.15em" }}>
@@ -888,57 +1015,168 @@ export default function PrimeApp() {
         </div>
       </div>
 
-      {showSettings && (
-        <div className="fixed inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setShowSettings(false)}>
-          <div className="w-full p-5 rounded-t-3xl" style={{ maxWidth: 480, background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-lg font-bold text-white">Settings</div>
-              <button onClick={() => setShowSettings(false)} style={{ color: "#8a8a93" }}><X size={20} /></button>
+      {/* recipe modal */}
+      {recipeFood && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setRecipeFood(null)}>
+          <div className="w-full p-5 rounded-t-3xl overflow-y-auto" style={{ maxWidth: 480, maxHeight: "85vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-1">
+              <div className="text-xl font-extrabold text-white">{recipeFood.name}</div>
+              <button onClick={() => setRecipeFood(null)} style={{ color: "#8a8a93" }}><X size={22} /></button>
             </div>
-            <div className="space-y-4">
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <Label>Start weight</Label>
-                  <input value={profile.startWeight} onChange={(e) => { const p = { ...profile, startWeight: parseFloat(e.target.value) || 0 }; setProfile(p); sSet("prime-profile", p); }}
-                    inputMode="decimal" className="mt-2 w-full rounded-xl px-3 py-2.5 text-white outline-none" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }} />
+            <div className="text-xs mb-3" style={{ color: "#8a8a93" }}>{recipeFood.serving}</div>
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {[["kcal", recipeFood.kcal, "kcal"], ["P", recipeFood.protein, "g"], ["C", recipeFood.carbs, "g"], ["F", recipeFood.fat, "g"]].map(([l, v, u]) => (
+                <div key={l} className="rounded-xl p-2 text-center" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+                  <div className="text-lg font-extrabold text-white">{v}</div>
+                  <div className="text-xs" style={{ color: "#6b6b73" }}>{l === "kcal" ? "kcal" : l}{l !== "kcal" ? ` (${u})` : ""}</div>
                 </div>
-                <div className="flex-1">
-                  <Label>Goal weight</Label>
-                  <input value={profile.goalWeight} onChange={(e) => { const p = { ...profile, goalWeight: parseFloat(e.target.value) || 0 }; setProfile(p); sSet("prime-profile", p); }}
-                    inputMode="decimal" className="mt-2 w-full rounded-xl px-3 py-2.5 text-white outline-none" style={{ background: "#1d1d22", border: `1px solid ${COL.line}` }} />
-                </div>
-              </div>
-              <div>
-                <Label>Diet preference</Label>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]].map(([k, t]) => (
-                    <button key={k} onClick={() => { const p = { ...profile, diet: k }; setProfile(p); sSet("prime-profile", p); if (k !== "both") setDietView(k); }}
-                      className="rounded-xl py-2 text-sm font-semibold"
-                      style={profile.diet === k ? { background: COL.amber, color: "#000" } : { background: "#1d1d22", color: "#cfcfd6", border: `1px solid ${COL.line}` }}>{t}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
-
-              <button onClick={async () => { setShowSettings(false); await supabase.auth.signOut(); }}
-                className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: "#1d1d22", color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
-                <LogOut size={16} /> Sign out
-              </button>
-
-              <button
-                onClick={async () => {
-                  if (confirm("Reset ALL your data and start over? This cannot be undone.")) {
-                    await clearAll();
-                    setProfile(null); setWeights([]); setLifts({}); setComplete([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
-                  }
-                }}
-                className="w-full rounded-xl py-2.5 text-sm font-semibold" style={{ background: "#2a1414", color: "#ff8a8a", border: "1px solid #3a1a1a" }}>
-                Reset all data
-              </button>
+              ))}
             </div>
+            <Label>Ingredients</Label>
+            <ul className="mt-2 mb-4 space-y-1">
+              {recipeFood.ingredients.map((ing, i) => (
+                <li key={i} className="text-sm flex gap-2" style={{ color: "#cfcfd6" }}><span style={{ color: COL.amber }}>•</span>{ing}</li>
+              ))}
+            </ul>
+            <Label>Method</Label>
+            <ol className="mt-2 mb-4 space-y-2">
+              {recipeFood.recipe.map((stp, i) => (
+                <li key={i} className="text-sm flex gap-3" style={{ color: "#cfcfd6" }}>
+                  <span className="shrink-0 flex items-center justify-center font-bold" style={{ width: 22, height: 22, borderRadius: 6, background: COL.inp, color: COL.amber, fontSize: 12 }}>{i + 1}</span>
+                  <span>{stp}</span>
+                </li>
+              ))}
+            </ol>
+            <button onClick={() => { addFood(recipeFood, recipeFood.meal); setRecipeFood(null); setTab("diet"); }}
+              className="w-full rounded-xl py-3 font-bold uppercase flex items-center justify-center gap-2" style={{ background: COL.amber, color: "#000", letterSpacing: "0.05em" }}>
+              <Plus size={16} /> Log this meal
+            </button>
           </div>
         </div>
       )}
+
+      {/* settings / profile sheet */}
+      {showSettings && (
+        <SettingsSheet
+          profile={profile} session={session} startDate={startDate} dayNum={dayNum} targets={T}
+          onClose={() => setShowSettings(false)}
+          onUpdate={updateProfile}
+          onSignOut={async () => { setShowSettings(false); await supabase.auth.signOut(); }}
+          onReset={async () => {
+            if (confirm("Reset ALL your data and start over? This cannot be undone.")) {
+              await clearAll();
+              setProfile(null); setWeights([]); setLifts({}); setComplete([]); setPhotos([]); setDay(blankDay()); setSelDate(new Date()); setTab("today"); setShowSettings(false);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============================ QUICK ADD (custom food) ============================ */
+function QuickAdd({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [kcal, setKcal] = useState("");
+  const [protein, setProtein] = useState("");
+  return (
+    <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
+      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between">
+        <div className="flex items-center gap-2"><Plus size={16} style={{ color: COL.amber }} /><span className="font-bold text-white">Add a custom food</span></div>
+        <ChevronRight size={16} style={{ color: "#6b6b73", transform: open ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2">
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 2 bananas" />
+          <div className="flex gap-2">
+            <Input value={kcal} onChange={(e) => setKcal(e.target.value)} inputMode="numeric" placeholder="kcal" />
+            <Input value={protein} onChange={(e) => setProtein(e.target.value)} inputMode="numeric" placeholder="protein (g)" />
+          </div>
+          <button
+            onClick={() => {
+              if (!name) return;
+              onAdd({ name, kcal: parseFloat(kcal) || 0, protein: parseFloat(protein) || 0, carbs: 0, fat: 0 });
+              setName(""); setKcal(""); setProtein(""); setOpen(false);
+            }}
+            className="w-full rounded-xl py-2.5 font-bold" style={{ background: COL.amber, color: "#000" }}>
+            Add to log
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================ SETTINGS / PROFILE ============================ */
+function SettingsSheet({ profile, session, startDate, dayNum, targets: T, onClose, onUpdate, onSignOut, onReset }) {
+  const num = (v) => (v === "" || v === null || isNaN(parseFloat(v)) ? "" : parseFloat(v));
+  return (
+    <div className="fixed inset-0 z-30 flex items-end justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+      <div className="w-full p-5 rounded-t-3xl overflow-y-auto" style={{ maxWidth: 480, maxHeight: "90vh", background: COL.card, border: `1px solid ${COL.line}` }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2"><User size={18} style={{ color: COL.amber }} /><div className="text-lg font-bold text-white">Profile & Settings</div></div>
+          <button onClick={onClose} style={{ color: "#8a8a93" }}><X size={20} /></button>
+        </div>
+
+        <div className="rounded-xl p-3 mb-4" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+          <div className="flex items-center gap-2 text-white font-semibold mb-1"><Activity size={15} style={{ color: COL.amber }} />Your daily targets</div>
+          <div className="text-sm" style={{ color: "#cfcfd6" }}>{T.calories} kcal · {T.protein}g protein · {T.carbs}g carbs · {T.fat}g fat</div>
+          <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>BMR {T.bmr} · maintenance ≈ {T.tdee} kcal</div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <Label>Name</Label>
+            <div className="mt-2"><Input value={profile.name || ""} onChange={(e) => onUpdate({ name: e.target.value })} placeholder="You" /></div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><Label>Sex</Label><div className="mt-2"><Pills cols={2} options={[["male", "Male"], ["female", "Female"]]} value={profile.sex || "male"} onChange={(v) => onUpdate({ sex: v })} /></div></div>
+            <div style={{ width: 90 }}><Label>Age</Label><div className="mt-2"><Input value={profile.age ?? ""} onChange={(e) => onUpdate({ age: parseInt(e.target.value) || 0 })} inputMode="numeric" /></div></div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><Label>Height (cm)</Label><div className="mt-2"><Input value={profile.heightCm ?? ""} onChange={(e) => onUpdate({ heightCm: num(e.target.value) })} inputMode="decimal" /></div></div>
+            <div className="flex-1"><Label>Goal weight</Label><div className="mt-2"><Input value={profile.goalWeight ?? ""} onChange={(e) => onUpdate({ goalWeight: num(e.target.value) })} inputMode="decimal" /></div></div>
+          </div>
+          <div>
+            <Label>Starting weight</Label>
+            <div className="mt-2"><Input value={profile.startWeight ?? ""} onChange={(e) => onUpdate({ startWeight: num(e.target.value) })} inputMode="decimal" /></div>
+            <div className="text-xs mt-1" style={{ color: "#6b6b73" }}>Daily weigh-ins are logged on the Today tab.</div>
+          </div>
+          <div>
+            <Label>Goal</Label>
+            <div className="mt-2 space-y-2">
+              {Object.entries(GOALS).map(([k, g]) => (
+                <button key={k} onClick={() => onUpdate({ goal: k })} className="w-full text-left rounded-xl px-4 py-2.5"
+                  style={profile.goal === k ? { background: COL.amber, color: "#000" } : { background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+                  <span className="font-bold">{g.label}</span> <span className="text-xs">· {g.tag}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label>Activity level</Label>
+            <select value={profile.activity || "moderate"} onChange={(e) => onUpdate({ activity: e.target.value })}
+              className="mt-2 w-full rounded-xl px-3 py-3 text-white outline-none" style={{ background: COL.inp, border: `1px solid ${COL.line}` }}>
+              {Object.entries(ACTIVITY).map(([k, a]) => <option key={k} value={k} style={{ background: COL.inp }}>{a.label}</option>)}
+            </select>
+          </div>
+          <div><Label>Country</Label><div className="mt-2"><Pills cols={2} options={[["india", "India"], ["other", "Other"]]} value={profile.country || "india"} onChange={(v) => onUpdate({ country: v, region: v === "india" ? (profile.region || "north") : "any" })} /></div></div>
+          {profile.country === "india" && (
+            <div><Label>Regional cuisine</Label><div className="mt-2"><Pills cols={2} options={[["north", "North Indian"], ["south", "South Indian"]]} value={profile.region || "north"} onChange={(v) => onUpdate({ region: v })} /></div></div>
+          )}
+          <div><Label>Diet preference</Label><div className="mt-2"><Pills options={[["veg", "Veg"], ["nonveg", "Non-veg"], ["both", "Both"]]} value={profile.diet || "both"} onChange={(v) => onUpdate({ diet: v })} /></div></div>
+
+          <div className="text-xs" style={{ color: "#6b6b73" }}>Started {prettyDate(startDate)} · Day {Math.max(0, dayNum)} · {session?.user?.email}</div>
+
+          <button onClick={onSignOut} className="w-full rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2" style={{ background: COL.inp, color: "#cfcfd6", border: `1px solid ${COL.line}` }}>
+            <LogOut size={16} /> Sign out
+          </button>
+          <button onClick={onReset} className="w-full rounded-xl py-2.5 text-sm font-semibold" style={{ background: "#2a1414", color: "#ff8a8a", border: "1px solid #3a1a1a" }}>
+            Reset all data
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

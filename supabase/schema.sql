@@ -33,3 +33,32 @@ create policy "update own rows" on public.user_data
 
 create policy "delete own rows" on public.user_data
   for delete using (auth.uid() = user_id);
+
+-- ============================================================
+--  STORAGE — progress photos
+--  A private bucket "progress". Each user can only read/write files
+--  inside a folder named after their own user id (e.g. <uid>/photo.jpg).
+-- ============================================================
+
+insert into storage.buckets (id, name, public)
+values ('progress', 'progress', false)
+on conflict (id) do nothing;
+
+drop policy if exists "progress read own"   on storage.objects;
+drop policy if exists "progress insert own" on storage.objects;
+drop policy if exists "progress delete own" on storage.objects;
+
+create policy "progress read own" on storage.objects
+  for select using (
+    bucket_id = 'progress' and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "progress insert own" on storage.objects
+  for insert with check (
+    bucket_id = 'progress' and auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "progress delete own" on storage.objects
+  for delete using (
+    bucket_id = 'progress' and auth.uid()::text = (storage.foldername(name))[1]
+  );

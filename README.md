@@ -15,6 +15,27 @@ Takes about 20–30 minutes the first time.
 
 ---
 
+## What's inside
+
+- **Personalised onboarding** — sex, age, height, weight, goal (lose fat / reach
+  your prime / build muscle), activity level, country & cuisine, diet preference.
+  Everything is editable later in **Profile & Settings**.
+- **Calorie + macro engine** — your daily calorie and protein/carb/fat targets are
+  auto-calculated (Mifflin–St Jeor BMR → TDEE → goal adjustment) and tracked live.
+- **Diet plans with recipes** — Indian North/South, veg & non-veg meal suggestions.
+  Tap any meal for the full recipe, ingredients and calories; one tap logs it.
+- **Workout plans with demo videos** — a 28-week progressive program; every
+  exercise has a target muscle, coaching cue and a **Watch demo** form video.
+- **Trackers** — calories, protein/carbs/fat, steps, water, sleep, weight, lifts.
+- **Progress photos** — upload weekly photos (stored privately in Supabase Storage)
+  plus a weight trend chart, BMI, streaks and a completion calendar.
+
+> The SQL script (`supabase/schema.sql`) also creates a private **`progress`**
+> storage bucket for photos. If you set the project up earlier, just **re-run the
+> script** to add it.
+
+---
+
 ## STEP 1 — Put this code on GitHub
 
 1. Create a free account at https://github.com
