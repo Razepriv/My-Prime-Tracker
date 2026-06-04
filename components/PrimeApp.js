@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isConfigured } from "@/lib/supabase";
 import {
   Home, Dumbbell, UtensilsCrossed, TrendingUp, Check, Plus, Minus,
