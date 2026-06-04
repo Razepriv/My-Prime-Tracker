@@ -4,6 +4,7 @@
 // Env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 //      VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, CRON_SECRET (optional)
 import webpush from "web-push";
+import { cronAuthed } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -12,12 +13,6 @@ const URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
 const SR = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
 const VPUB = (process.env.VAPID_PUBLIC_KEY || "").trim();
 const VPRIV = (process.env.VAPID_PRIVATE_KEY || "").trim();
-
-function authed(req) {
-  const s = process.env.CRON_SECRET;
-  if (!s) return true; // allow if no secret configured
-  return (req.headers.get("authorization") || "") === `Bearer ${s}`;
-}
 
 async function loadRows() {
   const r = await fetch(`${URL}/rest/v1/user_data?select=user_id,key,value&key=in.(prime-profile,prime-push)`, {
@@ -28,7 +23,7 @@ async function loadRows() {
 }
 
 export async function GET(req) {
-  if (!authed(req)) return new Response("unauthorized", { status: 401 });
+  if (!cronAuthed(req)) return new Response("unauthorized", { status: 401 });
   if (!URL || !SR || !VPUB || !VPRIV) return Response.json({ skipped: "push env not configured" });
   webpush.setVapidDetails("mailto:noreply@prime-tracker.app", VPUB, VPRIV);
 

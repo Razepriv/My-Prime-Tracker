@@ -3,6 +3,7 @@
 // back to a static message), and pushes it. No-op unless push env is set.
 import webpush from "web-push";
 import { weightTrend } from "@/lib/adaptive";
+import { cronAuthed } from "@/lib/serverAuth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -13,12 +14,6 @@ const VPUB = (process.env.VAPID_PUBLIC_KEY || "").trim();
 const VPRIV = (process.env.VAPID_PRIVATE_KEY || "").trim();
 const GROQ = (process.env.GROQ_API_KEY || "").trim();
 const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
-
-function authed(req) {
-  const s = process.env.CRON_SECRET;
-  if (!s) return true;
-  return (req.headers.get("authorization") || "") === `Bearer ${s}`;
-}
 
 async function coachLine(prof, weights) {
   const trend = weightTrend(weights || []);
@@ -48,7 +43,7 @@ async function coachLine(prof, weights) {
 }
 
 export async function GET(req) {
-  if (!authed(req)) return new Response("unauthorized", { status: 401 });
+  if (!cronAuthed(req)) return new Response("unauthorized", { status: 401 });
   if (!URL || !SR || !VPUB || !VPRIV) return Response.json({ skipped: "push env not configured" });
   webpush.setVapidDetails("mailto:noreply@prime-tracker.app", VPUB, VPRIV);
 

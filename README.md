@@ -58,10 +58,19 @@ role key (so the scheduled job can read who to notify), and a cron secret.
    - `VAPID_PRIVATE_KEY` = the **private** key
    - `SUPABASE_SERVICE_ROLE_KEY` = Supabase → Settings → API → *service_role* (keep secret)
    - `CRON_SECRET` = any random string
-3. Redeploy. `vercel.json` already schedules `/api/cron/reminders` hourly and
-   `/api/cron/weekly` weekly. Users enable it under **Settings → Notifications →
-   Enable background push**. Without these vars, reminders still work while the
-   app is open.
+3. Redeploy. Users enable it under **Settings → Notifications → Enable background
+   push**. Without these vars, reminders still work while the app is open.
+
+**Scheduling the cron (external — works on Vercel Hobby).** Vercel Hobby only
+allows one cron run per day, but per-user reminder times need an hourly check, so
+use any free scheduler (e.g. [cron-job.org](https://cron-job.org)) to call:
+
+- **Hourly:** `https://<your-app>/api/cron/reminders?key=YOUR_CRON_SECRET`
+- **Weekly:** `https://<your-app>/api/cron/weekly?key=YOUR_CRON_SECRET`
+
+(Or send `Authorization: Bearer YOUR_CRON_SECRET` as a header instead of `?key=`.)
+The endpoints are safe to call anytime — reminders only push to users whose local
+reminder hour matches the moment they run.
 
 ---
 
