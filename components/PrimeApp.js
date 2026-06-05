@@ -10,7 +10,7 @@ import {
   Sparkles, Send, Smartphone, Bell, Trophy, ScanLine, Share2, Users,
 } from "lucide-react";
 import InstallGuide from "@/components/InstallGuide";
-import { ACHIEVEMENTS, evaluate as evalAchievements, meta as achMeta } from "@/lib/achievements";
+import { ACHIEVEMENTS, LIVE_IDS, evaluate as evalAchievements, meta as achMeta } from "@/lib/achievements";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts";
@@ -1004,8 +1004,17 @@ export default function PrimeApp() {
   const score = Math.round(dayScore(day) * 100);
 
   /* ---- achievements + reminders ---- */
-  const towardKg = profile ? (profile.goalWeight <= profile.startWeight ? profile.startWeight - latestWeight : latestWeight - profile.startWeight) : 0;
-  const goalHit = profile ? (profile.goalWeight <= profile.startWeight ? latestWeight <= profile.goalWeight : latestWeight >= profile.goalWeight) : false;
+  // Progress is measured between the user's FIRST and LATEST logged weigh-ins
+  // (not the onboarding estimate), and needs >=2 weigh-ins — so a single day-one
+  // entry can't fake "5 kg down" or "goal reached".
+  const loggedW = weights.length;
+  const firstW = loggedW ? weights[0].weight : null;
+  const lastW = loggedW ? weights[weights.length - 1].weight : null;
+  const lossGoal = profile ? profile.goalWeight <= profile.startWeight : true;
+  const towardKg = (profile && loggedW >= 2) ? Math.max(0, lossGoal ? firstW - lastW : lastW - firstW) : 0;
+  const goalHit = !!(profile && loggedW >= 2 && Math.abs(profile.startWeight - profile.goalWeight) >= 1 &&
+    (lossGoal ? (firstW > profile.goalWeight && lastW <= profile.goalWeight)
+              : (firstW < profile.goalWeight && lastW >= profile.goalWeight)));
   const achStats = {
     streak, daysDone: complete.length,
     prepDone: !!(profile && prepWeeksFor(profile.experience) > 0 && !sched.prep && !sched.beforeStart && sched.week >= 1),
@@ -1014,15 +1023,21 @@ export default function PrimeApp() {
   };
   useEffect(() => {
     if (!profile) return;
-    const unlocked = evalAchievements(achStats);
-    const fresh = unlocked.filter((id) => !achievements.includes(id));
-    if (fresh.length) {
-      const next = Array.from(new Set([...achievements, ...unlocked]));
-      setAchievements(next); sSet("prime-achievements", next);
-      fresh.forEach((id) => { const m = achMeta(id); if (m) notify("🏆 " + m.title, m.desc); });
-      if (fresh.length === 1) { const m = achMeta(fresh[0]); setAchToast({ title: m.title, desc: m.desc }); }
-      else setAchToast({ title: `${fresh.length} achievements unlocked!`, desc: fresh.map((id) => achMeta(id)?.title).filter(Boolean).join(", ") });
-      setTimeout(() => setAchToast(null), 6000);
+    const trueNow = evalAchievements(achStats);
+    // permanent (sticky) badges stay once earned; live badges only while true
+    const sticky = achievements.filter((id) => !LIVE_IDS.includes(id));
+    const next = Array.from(new Set([...sticky, ...trueNow]));
+    const fresh = next.filter((id) => !achievements.includes(id));
+    const removed = achievements.filter((id) => !next.includes(id));
+    if (fresh.length || removed.length) {
+      setAchievements(next);
+      sSet("prime-achievements", next);
+      if (fresh.length) {
+        fresh.forEach((id) => { const m = achMeta(id); if (m) notify("🏆 " + m.title, m.desc); });
+        if (fresh.length === 1) { const m = achMeta(fresh[0]); setAchToast({ title: m.title, desc: m.desc }); }
+        else setAchToast({ title: `${fresh.length} achievements unlocked!`, desc: fresh.map((id) => achMeta(id)?.title).filter(Boolean).join(", ") });
+        setTimeout(() => setAchToast(null), 6000);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [achStats.streak, achStats.daysDone, achStats.prepDone, achStats.proteinHit, achStats.stepsHit, achStats.towardKg, achStats.goalHit]);
