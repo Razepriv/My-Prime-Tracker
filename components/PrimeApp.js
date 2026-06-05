@@ -2059,6 +2059,8 @@ function QuickAdd({ onAdd }) {
   const [name, setName] = useState("");
   const [kcal, setKcal] = useState("");
   const [protein, setProtein] = useState("");
+  const [carbs, setCarbs] = useState("");
+  const [fat, setFat] = useState("");
   return (
     <div className="rounded-2xl p-4" style={{ background: COL.card, border: `1px solid ${COL.line}` }}>
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between">
@@ -2072,11 +2074,15 @@ function QuickAdd({ onAdd }) {
             <Input value={kcal} onChange={(e) => setKcal(e.target.value)} inputMode="numeric" placeholder="kcal" />
             <Input value={protein} onChange={(e) => setProtein(e.target.value)} inputMode="numeric" placeholder="protein (g)" />
           </div>
+          <div className="flex gap-2">
+            <Input value={carbs} onChange={(e) => setCarbs(e.target.value)} inputMode="numeric" placeholder="carbs (g)" />
+            <Input value={fat} onChange={(e) => setFat(e.target.value)} inputMode="numeric" placeholder="fat (g)" />
+          </div>
           <button
             onClick={() => {
               if (!name) return;
-              onAdd({ name, kcal: parseFloat(kcal) || 0, protein: parseFloat(protein) || 0, carbs: 0, fat: 0 });
-              setName(""); setKcal(""); setProtein(""); setOpen(false);
+              onAdd({ name, kcal: parseFloat(kcal) || 0, protein: parseFloat(protein) || 0, carbs: parseFloat(carbs) || 0, fat: parseFloat(fat) || 0 });
+              setName(""); setKcal(""); setProtein(""); setCarbs(""); setFat(""); setOpen(false);
             }}
             className="w-full rounded-xl py-2.5 font-bold" style={{ background: COL.amber, color: "#000" }}>
             Add to log
